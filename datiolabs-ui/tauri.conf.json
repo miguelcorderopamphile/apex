@@ -26,20 +26,18 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
-    "nsis": {
-      "template": "installer.nsi",
-      "installerIcon": "icons/icon.ico",
-      "headerImage": "icons/header.bmp",
-      "license": "LICENSE",
-      "welcomeImage": "icons/welcome.bmp",
-      "displayLanguageSelector": false,
-      "allowElevatedProcess": true,
-      "perMachine": false,
-      "oneClick": false,
-      "preCompressed": false,
-      "includeStartMenuShortcut": true,
-      "createDesktopShortcut": true,
-      "createUninstaller": true
+    "icon": [
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "icons/header.bmp",
+        "sidebarImage": "icons/welcome.bmp",
+        "displayLanguageSelector": false,
+        "installMode": "currentUser"
+      }
     }
   }
 }
