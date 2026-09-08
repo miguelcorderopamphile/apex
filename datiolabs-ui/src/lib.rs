@@ -39,7 +39,7 @@ use axum::{
     routing::{get, post},
 };
 use futures::stream::Stream;
-use futures::StreamExt;
+use futures::{SinkExt, StreamExt};
 use rand::Rng;
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -874,8 +874,8 @@ fn validar_clave_licencia(clave: &str, rubros: u16) -> bool {
         suma += digitos[i] as u32 * (i as u32 + 1);
     }
     let checksum = (suma % 10000) as u16;
-    let esperado = digitos[12] * 1000 + digitos[13] * 100 + digitos[14] * 10 + digitos[15];
-    checksum as u16 == esperado
+    let esperado = digitos[12] as u16 * 1000 + digitos[13] as u16 * 100 + digitos[14] as u16 * 10 + digitos[15] as u16;
+    checksum == esperado
 }
 
 #[tauri::command]
