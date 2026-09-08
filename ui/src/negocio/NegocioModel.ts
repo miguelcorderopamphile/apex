@@ -1,4 +1,4 @@
-import { api, ConfigInfo, RUBRO_ABASTO, RUBRO_LICORERIA, RUBRO_PANADERIA } from './api';
+import { api, ConfigInfo, RUBRO_ABASTO, RUBRO_LICORERIA, RUBRO_PANADERIA, RUBRO_RETAIL } from './api';
 
 export class NegocioModel {
     private config: ConfigInfo | null = null;
@@ -65,4 +65,4 @@ export class NegocioModel {
     }
 }
 
-export { RUBRO_ABASTO, RUBRO_PANADERIA, RUBRO_LICORERIA };
+export { RUBRO_ABASTO, RUBRO_PANADERIA, RUBRO_LICORERIA, RUBRO_RETAIL };

@@ -1,5 +1,5 @@
 import { api, ConfigInfo } from './api';
-import { NegocioModel, RUBRO_ABASTO, RUBRO_LICORERIA, RUBRO_PANADERIA } from './NegocioModel';
+import { NegocioModel, RUBRO_ABASTO, RUBRO_LICORERIA, RUBRO_PANADERIA, RUBRO_RETAIL } from './NegocioModel';
 
 export class WizardView {
     private contenedor: HTMLElement;
@@ -33,16 +33,17 @@ export class WizardView {
                 <div id="wz-sec-nuevo" class="${this.modo === 'nuevo' ? 'block' : 'hidden'} space-y-5">
                     <div>
                         <label class="block font-heading font-bold text-xs uppercase tracking-wide mb-1">Nombre del negocio *</label>
-                        <input id="wz-nombre" type="text" maxlength="64" placeholder="Ej: Licorería El Triunfo, Panadería Central..."
+                        <input id="wz-nombre" type="text" maxlength="64" placeholder="Ej: Licorería El Triunfo, Panadería Central, Tienda Retail..."
                             class="w-full border-2 border-brand-black rounded px-4 py-2.5 text-base font-bold focus:outline-none focus:ring-2 focus:ring-brand-purple" />
                     </div>
 
                     <div>
                         <p class="font-heading font-bold text-xs uppercase tracking-wide mb-2">Rubros comerciales que opera:</p>
-                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
                             ${this.tarjetaRubro('wz-abasto', 'Abasto', 'Comestibles y peso', RUBRO_ABASTO, 'bg-brand-cyan')}
                             ${this.tarjetaRubro('wz-panaderia', 'Panadería', 'Horneados FEFO', RUBRO_PANADERIA, 'bg-brand-yellow')}
                             ${this.tarjetaRubro('wz-licoreria', 'Licorería', 'Cuentas y consumo', RUBRO_LICORERIA, 'bg-brand-pink')}
+                            ${this.tarjetaRubro('wz-retail', 'Retail', 'Series y garantías', RUBRO_RETAIL, 'bg-purple-100')}
                         </div>
                     </div>
 

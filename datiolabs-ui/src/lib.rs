@@ -1651,30 +1651,6 @@ fn get_backup_dir() -> Result<String, UIError> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    #[cfg(target_os = "windows")]
-    {
-        // En Windows, verificar activación de licencia registrada por el instalador
-        use std::process::Command;
-        let salida = Command::new("reg")
-            .args(["query", r"HKCU\Software\DatioLabs", "/v", "LicenseKey"])
-            .output();
-
-        let activado = match salida {
-            Ok(out) if out.status.success() => {
-                let texto = String::from_utf8_lossy(&out.stdout);
-                texto.contains("LicenseKey") && !texto.trim().is_empty()
-            }
-            _ => false,
-        };
-
-        if !activado && !cfg!(debug_assertions) {
-            eprintln!(
-                "LICENCIA NO ACTIVADA: Ejecute el instalador autorizado para activar su copia."
-            );
-            std::process::exit(1);
-        }
-    }
-
     tauri::Builder::default()
         .setup(|app| {
             let mut db_path = std::path::PathBuf::from("../datiolabs_db");
