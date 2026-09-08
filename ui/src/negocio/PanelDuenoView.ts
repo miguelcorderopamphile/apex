@@ -1,4 +1,4 @@
-import { api, Categoria, CategoriaDineroBruto, CuentaAbierta, JornadaLaboral, LicenciaInfo, MonedaMetodo, PanelDatos, ProductoInfo, RespaldoInfo, Ticket } from './api';
+import { api, Categoria, CategoriaDineroBruto, CuentaAbierta, JornadaLaboral, MonedaMetodo, PanelDatos, ProductoInfo, RespaldoInfo, Ticket } from './api';
 import { NegocioModel } from './NegocioModel';
 
 export const parseNum = (n: unknown): number => {
@@ -49,7 +49,6 @@ export class PanelDuenoView {
     private modelo: NegocioModel;
     private criterioGrafica: 'volumen' | 'ingreso' = 'volumen';
     private respaldos: RespaldoInfo[] = [];
-    private licencia: LicenciaInfo | null = null;
     private transacciones: Ticket[] = [];
     private productos: ProductoInfo[] = [];
     private categorias: Categoria[] = [];
@@ -204,10 +203,9 @@ export class PanelDuenoView {
     }
 
     async render(): Promise<void> {
-        const [datos, respaldos, licencia, transacciones, productos, categorias, cuentas, jornada] = await Promise.all([
+        const [datos, respaldos, transacciones, productos, categorias, cuentas, jornada] = await Promise.all([
             api.panel(),
             api.respaldos(),
-            api.licencia(),
             api.ventas(),
             api.productos(),
             api.categorias(),
@@ -216,7 +214,6 @@ export class PanelDuenoView {
         ]);
         this.vm.setDatos(datos);
         this.respaldos = respaldos;
-        this.licencia = licencia;
         this.transacciones = transacciones;
         this.productos = productos;
         this.categorias = categorias;
@@ -240,10 +237,6 @@ export class PanelDuenoView {
 
         const inventarioBs = this.modelo.bs(datos.valorInventarioUsd);
         const conCuentas = this.modelo.tieneCapacidad(1 << 3) || this.modelo.tieneRubro(1 << 2);
-
-        const claveEnmascarada = this.licencia?.claveLicencia
-            ? this.licencia.claveLicencia.replace(/^(\d{4}).*(\d{4})$/, '$1XXXXXXXX$2')
-            : '0000XXXXXXXX0000';
 
         const categoriasDinero = (datos.dineroPorCategoria && datos.dineroPorCategoria.length > 0)
             ? datos.dineroPorCategoria
@@ -640,42 +633,29 @@ export class PanelDuenoView {
                 </div>
             </div>
 
-            <!-- Licencia y Estado de Terminal -->
+            <!-- Seguridad del Terminal y Acceso Administrativo -->
             <div class="bg-white border-2 border-brand-black rounded-lg shadow-brutal p-4 sm:p-6 flex flex-col justify-between">
                 <div>
                     <div class="flex justify-between items-center border-b-2 border-brand-black pb-3 mb-4">
                         <div>
-                            <h3 class="font-heading font-black text-lg sm:text-xl">Licencia y Activación</h3>
-                            <p class="text-xs text-gray-500 font-bold">Criptografía asimétrica Ed25519 validada sin dependencia de internet</p>
+                            <h3 class="font-heading font-black text-lg sm:text-xl">Seguridad y Acceso al Panel</h3>
+                            <p class="text-xs text-gray-500 font-bold">Control de credencial administrativa y protección de datos comerciales</p>
                         </div>
-                        <span class="px-2 py-1 rounded border border-brand-black font-black font-heading text-xs uppercase bg-green-200 text-green-900">
-                            Activa
+                        <span class="px-2 py-1 rounded border border-brand-black font-black font-heading text-xs uppercase bg-blue-100 text-blue-900">
+                            Protegido
                         </span>
                     </div>
-                    <div class="space-y-2 text-xs font-bold">
-                        <div class="flex justify-between border-b border-gray-200 pb-1.5">
-                            <span class="text-gray-500">Clave de Licencia</span>
-                            <span class="font-mono text-brand-purple">${claveEnmascarada}</span>
-                        </div>
-                        <div class="flex justify-between border-b border-gray-200 pb-1.5">
-                            <span class="text-gray-500">Titular Autorizado</span>
-                            <span class="truncate max-w-[200px]">${this.licencia?.titular || 'DatioLabs Enterprise Commercial'}</span>
-                        </div>
-                        <div class="flex justify-between border-b border-gray-200 pb-1.5">
-                            <span class="text-gray-500">Modalidad de Empleo</span>
-                            <span>${this.licencia?.tipo || 'Enterprise Standalone Local'}</span>
-                        </div>
-                        <div class="flex justify-between pb-1">
-                            <span class="text-gray-500">Vigencia y Validez</span>
-                            <span class="text-green-800">${this.licencia?.validez || 'Perpetua (Portabilidad Total)'}</span>
-                        </div>
+                    <div class="space-y-2 text-xs font-bold text-gray-700">
+                        <p class="leading-relaxed">
+                            Este terminal opera con aislamiento local absoluto. Toda transacción, cambio de inventario y cierre de jornada se resguarda mediante sumas de verificación criptográficas en tiempo real.
+                        </p>
                     </div>
                 </div>
 
                 <!-- Modificación de Clave Maestra del Dueño -->
                 <div class="mt-4 pt-3 border-t border-brand-black">
                     <span class="block font-heading font-black text-xs uppercase text-brand-black mb-1">Clave de Seguridad del Panel</span>
-                    <p class="text-[11px] text-gray-600 font-bold mb-2">Cambia la clave para restringir el acceso a este panel o déjala en blanco para dejarlo abierto.</p>
+                    <p class="text-[11px] text-gray-600 font-bold mb-2">Modifica la clave numérica para restringir el acceso a este panel o déjala en blanco para libre acceso.</p>
                     <form id="form-cambiar-clave" class="flex flex-wrap gap-2 items-center">
                         <input id="pin-actual" type="password" maxlength="16" placeholder="Clave actual" class="border-2 border-brand-black rounded px-2.5 py-1 text-xs font-bold w-28" />
                         <input id="pin-nuevo" type="password" maxlength="16" placeholder="Nueva clave (vacío = sin clave)" class="border-2 border-brand-black rounded px-2.5 py-1 text-xs font-bold flex-1 min-w-[140px]" />

@@ -180,14 +180,13 @@ export class WizardView {
 
     private tarjetaRubro(id: string, titulo: string, desc: string, bit: number, color: string): string {
         return `
-        <label class="cursor-pointer group">
-            <input type="checkbox" id="${id}" data-bit="${bit}" class="peer sr-only" />
-            <div class="border-2 border-brand-black rounded-lg p-3 ${color} bg-opacity-20 group-has-peer-checked:bg-opacity-100 peer-focus-visible:ring-2 ring-brand-purple transition-all group-hover:-translate-y-0.5">
+        <label for="${id}" class="cursor-pointer block">
+            <div class="border-2 border-brand-black rounded-lg p-3 ${color} bg-opacity-20 hover:bg-opacity-40 transition-all hover:-translate-y-0.5 shadow-brutal-sm">
                 <div class="flex items-center justify-between">
-                    <span class="font-heading font-black text-sm">${titulo}</span>
-                    <span class="w-5 h-5 rounded-full border-2 border-brand-black bg-white flex items-center justify-center text-transparent font-black text-xs group-has-peer-checked:text-brand-black">OK</span>
+                    <span class="font-heading font-black text-sm text-brand-black">${titulo}</span>
+                    <input type="checkbox" id="${id}" data-bit="${bit}" class="w-5 h-5 accent-brand-black cursor-pointer border-2 border-brand-black rounded" />
                 </div>
-                <p class="text-xs text-brand-text font-body mt-1">${desc}</p>
+                <p class="text-xs text-brand-text font-body mt-1 font-bold">${desc}</p>
             </div>
         </label>`;
     }
