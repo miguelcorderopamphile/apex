@@ -864,8 +864,8 @@ fn validar_clave_licencia(clave: &str, rubros: u16) -> bool {
     if digitos.len() != 16 {
         return false;
     }
-    let rubro_code = rubros & 0x0F;
-    let primeros4 = digitos[0] * 1000 + digitos[1] * 100 + digitos[2] * 10 + digitos[3];
+    let _rubro_code = rubros & 0x0F;
+    let primeros4 = digitos[0] as u16 * 1000 + digitos[1] as u16 * 100 + digitos[2] as u16 * 10 + digitos[3] as u16;
     if primeros4 == 0 {
         return false;
     }
