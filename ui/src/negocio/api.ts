@@ -43,6 +43,8 @@ export interface ConfigInfo {
     rubros: number;
     capacidades: number;
     tienePin: boolean;
+    licenciaEstado?: string;
+    licenciaTitular?: string;
 }
 
 export interface TasaImpuesto {
@@ -911,13 +913,19 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
             return Promise.resolve(demoStore.config as unknown as T);
         case 'inicializar_negocio': {
             const pin = args?.pinDueno ? String(args.pinDueno).trim() : '';
+            const licClave = args?.licenciaClave ? String(args.licenciaClave).trim() : '';
             demoStore.pinDueno = pin;
             demoStore.config = {
                 nombre: String(args?.nombre || 'Mi Negocio Demo'),
                 rubros: Number(args?.rubros || 15),
                 capacidades: CAP_UNITARIA | CAP_PESABLE | CAP_CUENTA_ABIERTA | CAP_SERIE | CAP_VARIANTES,
                 tienePin: pin.length > 0,
+                licenciaEstado: licClave ? 'activa' : 'demo',
+                licenciaTitular: licClave ? 'Empresa DatioLabs' : '',
             };
+            demoStore.licencia.claveLicencia = licClave || '0000888811110000';
+            demoStore.licencia.estado = licClave ? 'activa' : 'demo';
+            demoStore.licencia.titular = licClave ? 'Empresa DatioLabs' : 'DatioLabs Demo';
             demoStore.persist();
             return Promise.resolve(undefined as unknown as T);
         }
@@ -1571,6 +1579,23 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
         }
         case 'obtener_licencia':
             return Promise.resolve(demoStore.licencia as unknown as T);
+        case 'validar_licencia': {
+            const clave = String(args?.clave || '');
+            const limpio = clave.replace(/[^a-zA-Z0-9]/g, '');
+            if (limpio.length !== 16) return Promise.resolve(false as unknown as T);
+            const digitos = limpio.split('').map(c => parseInt(c, 10)).filter(d => !isNaN(d) && d < 10);
+            if (digitos.length !== 16) return Promise.resolve(false as unknown as T);
+            let suma = 0;
+            for (let i = 0; i < 12; i++) suma += digitos[i] * (i + 1);
+            const checksum = suma % 10000;
+            const esperado = digitos[12] * 1000 + digitos[13] * 100 + digitos[14] * 10 + digitos[15];
+            return Promise.resolve((checksum === esperado) as unknown as T);
+        }
+        case 'generar_qr_panel': {
+            const roomId = 'room-' + Math.random().toString(36).slice(2, 10);
+            const url = `http://127.0.0.1:4000/panel?room=${roomId}`;
+            return Promise.resolve({ url, qrBase64: '', roomId } as unknown as T);
+        }
         case 'obtener_tasa_bcv':
             return Promise.resolve(demoStore.tasaActual as unknown as T);
         case 'forzar_actualizacion_tasa':
@@ -1805,8 +1830,8 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
 
 export const api = {
     config: () => invocar<ConfigInfo | null>('obtener_config'),
-    inicializar: (nombre: string, rubros: number, pin: string) =>
-        invocar<void>('inicializar_negocio', { nombre, rubros, pinDueno: pin || null }),
+    inicializar: (nombre: string, rubros: number, pin: string, licenciaClave?: string) =>
+        invocar<void>('inicializar_negocio', { nombre, rubros, pinDueno: pin || null, licenciaClave: licenciaClave || null, licenciaTitular: null }),
     validarPin: (pin: string) => invocar<boolean>('validar_pin_dueno', { pin }),
     productos: () => invocar<ProductoInfo[]>('listar_productos'),
     crearProducto: (p: {
@@ -1866,6 +1891,8 @@ export const api = {
     crearRespaldo: () => invocar<RespaldoInfo>('crear_respaldo'),
     restaurarRespaldo: (archivo?: string) => invocar<boolean>('restaurar_desde_respaldo', { archivo }),
     licencia: () => invocar<LicenciaInfo>('obtener_licencia'),
+    validarLicencia: (clave: string) => invocar<boolean>('validar_licencia', { clave }),
+    generarQr: () => invocar<{ url: string; qrBase64: string; roomId: string }>('generar_qr_panel'),
     cambiarPinDueno: (pinAnterior: string, pinNuevo: string) =>
         invocar<boolean>('cambiar_pin_dueno', { pinAnterior, pinNuevo }),
     tasa: () => invocar<TasaActual>('obtener_tasa_bcv'),

@@ -23,8 +23,8 @@ export class NegocioModel {
         return this.config;
     }
 
-    async inicializar(nombre: string, rubros: number, pin: string): Promise<void> {
-        await api.inicializar(nombre, rubros, pin);
+    async inicializar(nombre: string, rubros: number, pin: string, licenciaClave?: string): Promise<void> {
+        await api.inicializar(nombre, rubros, pin, licenciaClave);
         await this.cargarConfig();
         this.notificar();
     }

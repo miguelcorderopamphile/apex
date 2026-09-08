@@ -27,7 +27,8 @@ use uuid::Uuid;
 
 use axum::{
     Router,
-    extract::{Request, State},
+    extract::{Request, State, WebSocketUpgrade},
+    extract::ws::{Message as WsMessage, WebSocket},
     http::{
         HeaderMap, HeaderValue, Method, StatusCode,
         header::{COOKIE, SET_COOKIE},
@@ -38,9 +39,11 @@ use axum::{
     routing::{get, post},
 };
 use futures::stream::Stream;
+use futures::StreamExt;
 use rand::Rng;
+use std::collections::HashMap;
 use std::convert::Infallible;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 use tower_http::cors::{Any, CorsLayer};
 
 const SESSION_TTL_SECS: u64 = 7 * 24 * 3600;
@@ -180,6 +183,7 @@ struct AxumAppState {
     servicio_tasa: Arc<ServicioTasa>,
     session_store: SessionStore,
     tx: broadcast::Sender<()>,
+    signaling: Arc<Mutex<HashMap<String, Vec<mpsc::UnboundedSender<String>>>>>,
 }
 
 async fn api_auth_login(
@@ -419,6 +423,69 @@ async fn api_sse_events(
     Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default())
 }
 
+async fn ws_signaling_handler(
+    ws: WebSocketUpgrade,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+    State(state): State<AxumAppState>,
+) -> impl IntoResponse {
+    let room = params.get("room").cloned().unwrap_or_else(|| "default".to_string());
+    ws.on_upgrade(move |socket| handle_signaling_peer(socket, room, state))
+}
+
+async fn handle_signaling_peer(
+    socket: WebSocket,
+    room: String,
+    state: AxumAppState,
+) {
+    let (mut ws_tx, mut ws_rx) = socket.split();
+    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+
+    {
+        let mut rooms = state.signaling.lock().unwrap();
+        rooms.entry(room.clone()).or_insert_with(Vec::new).push(tx);
+    }
+
+    let room_for_remove = room.clone();
+    let state_clone = state.clone();
+
+    let send_task = tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            if ws_tx.send(WsMessage::Text(msg.into())).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let recv_task = tokio::spawn(async move {
+        while let Some(Ok(msg)) = ws_rx.next().await {
+            if let WsMessage::Text(text) = msg {
+                let peers = {
+                    let rooms = state_clone.signaling.lock().unwrap();
+                    rooms.get(&room).cloned().unwrap_or_default()
+                };
+                for peer_tx in &peers {
+                    let _ = peer_tx.send(text.to_string());
+                }
+            }
+        }
+    });
+
+    tokio::select! {
+        _ = send_task => {},
+        _ = recv_task => {},
+    }
+
+    {
+        let mut rooms = state.signaling.lock().unwrap();
+        if let Some(peers) = rooms.get_mut(&room_for_remove) {
+            peers.retain(|p| !p.is_closed());
+            if peers.is_empty() {
+                rooms.remove(&room_for_remove);
+            }
+        }
+    }
+}
+
 async fn api_cuentas(
     State(state): State<AxumAppState>,
 ) -> Result<Json<Vec<CuentaDto>>, StatusCode> {
@@ -510,6 +577,8 @@ struct ConfigDto {
     rubros: u16,
     capacidades: u16,
     tiene_pin: bool,
+    licencia_estado: String,
+    licencia_titular: String,
 }
 
 #[derive(Deserialize)]
@@ -729,6 +798,8 @@ fn obtener_config(estado: tauri::State<AppState>) -> Result<Option<ConfigDto>, U
         tiene_pin: !c.pin_dueno_sha256.is_empty(),
         nombre: c.nombre.as_str().to_string(),
         rubros: c.rubros,
+        licencia_estado: c.licencia_estado,
+        licencia_titular: c.licencia_titular,
     }))
 }
 
@@ -738,6 +809,8 @@ fn inicializar_negocio(
     nombre: String,
     rubros: u8,
     pin_dueno: Option<String>,
+    licencia_clave: Option<String>,
+    licencia_titular: Option<String>,
 ) -> Result<(), UIError> {
     let rubros_u16 = rubros as u16;
     if !rubros_activos(rubros_u16) {
@@ -748,11 +821,19 @@ fn inicializar_negocio(
     }
     let nombre_obj = Nombre::new(&nombre)
         .map_err(|e| UIError::new("nombre invalido", e))?;
+
+    let clave = licencia_clave.unwrap_or_default();
+    let titular = licencia_titular.unwrap_or_default();
+    let estado_lic = if clave.is_empty() { "demo".to_string() } else { "activa".to_string() };
+
     con_ledger(&estado, |db| {
         db.guardar_config(&ConfigNegocio {
             nombre: nombre_obj,
             rubros: rubros_u16,
             pin_dueno_sha256: pin_dueno.map(|p| hash_pin(&p)).unwrap_or_default(),
+            licencia_clave: clave,
+            licencia_titular: titular,
+            licencia_estado: estado_lic,
         })
     })?;
     Ok(())
@@ -762,6 +843,67 @@ fn inicializar_negocio(
 fn validar_pin_dueno(estado: tauri::State<AppState>, pin: String) -> Result<bool, UIError> {
     let cfg = config_requerida(&estado)?;
     Ok(!cfg.pin_dueno_sha256.is_empty() && cfg.pin_dueno_sha256 == hash_pin(&pin))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LicenciaDto {
+    estado: String,
+    tipo: String,
+    clave_licencia: String,
+    titular: String,
+    validez: String,
+}
+
+fn validar_clave_licencia(clave: &str, rubros: u16) -> bool {
+    let limpio: String = clave.chars().filter(|c| c.is_alphanumeric()).collect();
+    if limpio.len() != 16 {
+        return false;
+    }
+    let digitos: Vec<u8> = limpio.bytes().map(|b| b - b'0').filter(|&d| d < 10).collect();
+    if digitos.len() != 16 {
+        return false;
+    }
+    let rubro_code = rubros & 0x0F;
+    let primeros4 = digitos[0] * 1000 + digitos[1] * 100 + digitos[2] * 10 + digitos[3];
+    if primeros4 == 0 {
+        return false;
+    }
+    let mut suma: u32 = 0;
+    for i in 0..12 {
+        suma += digitos[i] as u32 * (i as u32 + 1);
+    }
+    let checksum = (suma % 10000) as u16;
+    let esperado = digitos[12] * 1000 + digitos[13] * 100 + digitos[14] * 10 + digitos[15];
+    checksum as u16 == esperado
+}
+
+#[tauri::command]
+fn obtener_licencia(estado: tauri::State<AppState>) -> Result<LicenciaDto, UIError> {
+    let cfg = config_requerida(&estado)?;
+    let tipo = match cfg.rubros {
+        r if r & 1 != 0 => "Enterprise Abasto",
+        r if r & 2 != 0 => "Enterprise Panaderia",
+        r if r & 4 != 0 => "Enterprise Licoreria",
+        r if r & 8 != 0 => "Enterprise Retail",
+        _ => "Enterprise Standalone Local",
+    };
+    Ok(LicenciaDto {
+        estado: cfg.licencia_estado,
+        tipo: tipo.to_string(),
+        clave_licencia: cfg.licencia_clave,
+        titular: cfg.licencia_titular,
+        validez: "Perpetua (Sin caducidad)".to_string(),
+    })
+}
+
+#[tauri::command]
+fn validar_licencia(
+    estado: tauri::State<AppState>,
+    clave: String,
+) -> Result<bool, UIError> {
+    let cfg = config_requerida(&estado)?;
+    Ok(validar_clave_licencia(&clave, cfg.rubros))
 }
 
 // ---------------- comandos: productos ----------------
@@ -1479,12 +1621,14 @@ fn get_lan_ip() -> Result<String, UIError> {
 struct QrData {
     url: String,
     qr_base64: String,
+    room_id: String,
 }
 
 #[tauri::command]
 fn generar_qr_panel(_state: tauri::State<AppState>) -> Result<QrData, UIError> {
     let ip = get_lan_ip()?;
-    let url = format!("http://{}:4000/panel", ip);
+    let room_id = Uuid::new_v4().to_string();
+    let url = format!("http://{}:4000/panel?room={}", ip, room_id);
 
     let code = qrcode::QrCode::new(url.as_bytes())
         .map_err(|e| UIError::new("error generando QR", &e.to_string()))?;
@@ -1505,7 +1649,7 @@ fn generar_qr_panel(_state: tauri::State<AppState>) -> Result<QrData, UIError> {
 
     use base64::Engine;
     let qr_base64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
-    Ok(QrData { url, qr_base64 })
+    Ok(QrData { url, qr_base64, room_id })
 }
 
 #[tauri::command]
@@ -1710,6 +1854,7 @@ pub fn run() {
                     .route("/api/auth/login", post(api_auth_login))
                     .route("/api/auth/logout", post(api_auth_logout))
                     .route("/api/events", get(api_sse_events))
+                    .route("/ws/signaling", get(ws_signaling_handler))
                     .route("/panel", get(serve_panel_html))
                     .layer(cors.clone());
 
@@ -1722,6 +1867,7 @@ pub fn run() {
                         servicio_tasa: servicio_tasa_for_axum,
                         session_store,
                         tx: broadcast::channel(16).0,
+                        signaling: Arc::new(Mutex::new(HashMap::new())),
                     });
 
                 if let Ok(listener) = tokio::net::TcpListener::bind("0.0.0.0:4000").await {
@@ -1734,6 +1880,8 @@ pub fn run() {
             obtener_config,
             inicializar_negocio,
             validar_pin_dueno,
+            obtener_licencia,
+            validar_licencia,
             crear_producto,
             listar_productos,
             compra_stock,

@@ -25,6 +25,7 @@
         .btn:active { transform:translate(2px,2px); box-shadow:none; }
         .btn-primary { background:#0f172a; color:#ffffff; }
         .btn-ghost { background:#ffffff; color:var(--text); }
+        .btn-p2p { background:#15803d; color:#ffffff; }
         .input { width:100%; padding:12px; border-radius:4px; border:2px solid var(--border); background:#ffffff; color:var(--text); font-size:16px; font-weight:600; box-shadow:inset 1px 1px 0px rgba(0,0,0,.08); }
         .stat { text-align:center; }
         .stat-value { font-size:24px; font-weight:900; font-variant-numeric:tabular-nums; }
@@ -56,6 +57,12 @@
         .modal-handle { width:40px; height:4px; background:#cbd5e1; border-radius:2px; margin:0 auto 16px; }
         .sse-dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--green); border:1.5px solid var(--border); margin-left:6px; vertical-align:middle; }
         .sse-dot.off { background:var(--red); }
+        .p2p-dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--yellow); border:1.5px solid var(--border); margin-left:6px; vertical-align:middle; }
+        .p2p-dot.connected { background:var(--green); }
+        .p2p-dot.off { background:var(--red); }
+        .conn-badge { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:3px; font-size:10px; font-weight:800; border:1px solid var(--border); text-transform:uppercase; }
+        .conn-badge-http { background:#e0f2fe; color:#075985; }
+        .conn-badge-p2p { background:#dcfce7; color:#166534; }
     </style>
 </head>
 <body>
@@ -85,8 +92,15 @@
 
     <div id="app" class="hidden">
         <header style="position:sticky;top:0;z-index:40;background:#ffffff;border-bottom:2px solid var(--border);padding:12px 16px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 1px 3px rgba(0,0,0,.05);">
-            <div style="font-weight:900;font-size:16px;letter-spacing:.02em;text-transform:uppercase;">DatioLabs <span class="sse-dot" id="sse-dot" title="conexion"></span></div>
-            <button class="btn btn-ghost" style="padding:6px 12px;font-size:12px;" id="logout-btn">Salir</button>
+            <div style="font-weight:900;font-size:16px;letter-spacing:.02em;text-transform:uppercase;">
+                DatioLabs
+                <span class="sse-dot" id="sse-dot" title="SSE"></span>
+                <span class="p2p-dot" id="p2p-dot" title="P2P"></span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+                <span class="conn-badge conn-badge-http" id="conn-badge">HTTP</span>
+                <button class="btn btn-ghost" style="padding:6px 12px;font-size:12px;" id="logout-btn">Salir</button>
+            </div>
         </header>
 
         <main style="max-width:600px;margin:0 auto;padding:16px 16px 80px;">
@@ -144,7 +158,7 @@
                     <span style="font-weight:700;text-transform:uppercase;font-size:13px;letter-spacing:.04em;">Stock de Productos</span>
                     <span style="font-size:11px;font-weight:700;color:var(--muted);" id="stock-count">0 items</span>
                 </div>
-                <input type="text" id="buscar-stock" maxlength="64" class="input" style="padding:8px 12px;font-size:14px;margin-bottom:10px;" placeholder="Buscar por nombre o SKU (máx 64)...">
+                <input type="text" id="buscar-stock" maxlength="64" class="input" style="padding:8px 12px;font-size:14px;margin-bottom:10px;" placeholder="Buscar por nombre o SKU (max 64)...">
                 <div id="stock-list" style="max-height:240px;overflow:auto;"></div>
             </div>
         </main>
@@ -172,6 +186,18 @@
         let topChart = null;
         let evtSource = null;
 
+        // WebRTC P2P State
+        let peerConnection = null;
+        let dataChannel = null;
+        let p2pConnected = false;
+        let wsSignaling = null;
+        let pendingRequests = new Map();
+        let requestCounter = 0;
+        const STUN_SERVERS = [
+            { urls: 'stun:stun.cloudflare.com:3478' },
+            { urls: 'stun:stun.l.google.com:19302' }
+        ];
+
         function showToast(msg, err) {
             const t = document.getElementById('toast');
             t.textContent = msg;
@@ -180,11 +206,199 @@
             setTimeout(() => t.classList.remove('show'), 3000);
         }
 
-        async function api(path, opts) {
+        // HTTP API fallback
+        async function apiHttp(path, opts) {
             const res = await fetch(API + path, { ...opts, headers: { 'Content-Type': 'application/json', ...(opts && opts.headers || {}) }, credentials: 'include' });
             if (res.status === 401) { logout(); throw new Error('401'); }
             if (!res.ok) throw new Error(await res.text());
             return res.json();
+        }
+
+        // P2P DataChannel API
+        async function apiP2P(path, opts) {
+            if (!dataChannel || dataChannel.readyState !== 'open') {
+                return apiHttp(path, opts);
+            }
+            const id = 'req-' + (++requestCounter);
+            const body = opts?.body || null;
+            const method = opts?.method || 'GET';
+            const msg = JSON.stringify({ id, method, path, body });
+            return new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    pendingRequests.delete(id);
+                    reject(new Error('P2P timeout'));
+                }, 10000);
+                pendingRequests.set(id, { resolve, reject, timeout });
+                dataChannel.send(msg);
+            });
+        }
+
+        // Smart API: P2P if available, HTTP fallback
+        async function api(path, opts) {
+            if (p2pConnected && dataChannel && dataChannel.readyState === 'open') {
+                try {
+                    return await apiP2P(path, opts);
+                } catch (e) {
+                    console.warn('P2P failed, falling back to HTTP:', e);
+                }
+            }
+            return apiHttp(path, opts);
+        }
+
+        // WebRTC Signaling
+        function getRoomId() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('room');
+        }
+
+        function getHost() {
+            return window.location.hostname || '127.0.0.1';
+        }
+
+        function updateConnBadge() {
+            const badge = document.getElementById('conn-badge');
+            const dot = document.getElementById('p2p-dot');
+            if (p2pConnected) {
+                badge.textContent = 'P2P';
+                badge.className = 'conn-badge conn-badge-p2p';
+                dot.className = 'p2p-dot connected';
+                dot.title = 'P2P Conectado';
+            } else {
+                badge.textContent = 'HTTP';
+                badge.className = 'conn-badge conn-badge-http';
+                dot.className = 'p2p-dot off';
+                dot.title = 'P2P Desconectado';
+            }
+        }
+
+        async function connectP2P(roomId) {
+            const host = getHost();
+            const wsUrl = `ws://${host}:4000/ws/signaling?room=${roomId}`;
+
+            try {
+                wsSignaling = new WebSocket(wsUrl);
+                wsSignaling.onopen = () => {
+                    console.log('[P2P] WebSocket connected, waiting for offer...');
+                };
+                wsSignaling.onmessage = async (event) => {
+                    const msg = JSON.parse(event.data);
+
+                    if (msg.type === 'offer') {
+                        await handleOffer(msg, roomId);
+                    } else if (msg.type === 'answer' && peerConnection) {
+                        await peerConnection.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+                        console.log('[P2P] Answer set');
+                    } else if (msg.type === 'ice-candidate' && peerConnection) {
+                        try {
+                            await peerConnection.addIceCandidate(new RTCIceCandidate(msg.candidate));
+                        } catch (e) {
+                            console.warn('[P2P] ICE candidate error:', e);
+                        }
+                    }
+                };
+                wsSignaling.onclose = () => {
+                    console.log('[P2P] WebSocket closed');
+                    p2pConnected = false;
+                    updateConnBadge();
+                    setTimeout(() => connectP2P(roomId), 3000);
+                };
+                wsSignaling.onerror = (e) => {
+                    console.error('[P2P] WebSocket error:', e);
+                };
+            } catch (e) {
+                console.error('[P2P] Failed to connect signaling:', e);
+                setTimeout(() => connectP2P(roomId), 3000);
+            }
+        }
+
+        async function handleOffer(msg, roomId) {
+            const config = { iceServers: STUN_SERVERS };
+            peerConnection = new RTCPeerConnection(config);
+
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate && wsSignaling && wsSignaling.readyState === WebSocket.OPEN) {
+                    wsSignaling.send(JSON.stringify({
+                        type: 'ice-candidate',
+                        candidate: event.candidate
+                    }));
+                }
+            };
+
+            peerConnection.onconnectionstatechange = () => {
+                console.log('[P2P] Connection state:', peerConnection.connectionState);
+                if (peerConnection.connectionState === 'connected') {
+                    p2pConnected = true;
+                    updateConnBadge();
+                    showToast('Conexion P2P establecida');
+                } else if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
+                    p2pConnected = false;
+                    updateConnBadge();
+                    showToast('Conexion P2P perdida, usando HTTP', true);
+                }
+            };
+
+            peerConnection.ondatachannel = (event) => {
+                setupDataChannel(event.channel);
+            };
+
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+            console.log('[P2P] Offer set');
+
+            dataChannel = peerConnection.createDataChannel('api', {
+                ordered: true
+            });
+            setupDataChannel(dataChannel);
+
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+
+            if (wsSignaling && wsSignaling.readyState === WebSocket.OPEN) {
+                wsSignaling.send(JSON.stringify({
+                    type: 'answer',
+                    sdp: peerConnection.localDescription
+                }));
+            }
+            console.log('[P2P] Answer sent');
+        }
+
+        function setupDataChannel(channel) {
+            dataChannel = channel;
+            dataChannel.onopen = () => {
+                console.log('[P2P] DataChannel open');
+                p2pConnected = true;
+                updateConnBadge();
+            };
+            dataChannel.onclose = () => {
+                console.log('[P2P] DataChannel closed');
+                p2pConnected = false;
+                updateConnBadge();
+            };
+            dataChannel.onmessage = (event) => {
+                try {
+                    const resp = JSON.parse(event.data);
+                    if (resp.id && pendingRequests.has(resp.id)) {
+                        const pending = pendingRequests.get(resp.id);
+                        clearTimeout(pending.timeout);
+                        pendingRequests.delete(resp.id);
+                        if (resp.error) {
+                            pending.reject(new Error(resp.error));
+                        } else {
+                            pending.resolve(resp.body);
+                        }
+                    }
+                } catch (e) {
+                    console.error('[P2P] Message parse error:', e);
+                }
+            };
+        }
+
+        // Initialize P2P if room parameter present
+        function initP2P() {
+            const roomId = getRoomId();
+            if (roomId) {
+                console.log('[P2P] Room detected:', roomId);
+                connectP2P(roomId);
+            }
         }
 
         function fmtUsd(n) { return '$' + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -212,11 +426,16 @@
             document.getElementById('app').classList.remove('hidden');
             loadAll();
             startSSE();
+            initP2P();
         }
 
         function logout() {
             api('/auth/logout', { method: 'POST' }).catch(() => {});
             if (evtSource) { evtSource.close(); evtSource = null; }
+            if (peerConnection) { peerConnection.close(); peerConnection = null; }
+            if (wsSignaling) { wsSignaling.close(); wsSignaling = null; }
+            p2pConnected = false;
+            updateConnBadge();
             document.getElementById('app').classList.add('hidden');
             document.getElementById('login').classList.remove('hidden');
             pinInput.value = '';
@@ -267,14 +486,14 @@
                 if (tasa.fluctuacion_pct != null) {
                     const pct = Number(tasa.fluctuacion_pct).toFixed(2);
                     fl.className = 'tasa-fluct ' + (tasa.direccion === 'subio' ? 'green' : tasa.direccion === 'bajo' ? 'red' : '');
-                    fl.textContent = (tasa.direccion === 'subio' ? '\\u25B2 ' : tasa.direccion === 'bajo' ? '\\u25BC ' : '') + pct + '%';
+                    fl.textContent = (tasa.direccion === 'subio' ? '\u25B2 ' : tasa.direccion === 'bajo' ? '\u25BC ' : '') + pct + '%';
                 } else {
                     fl.textContent = 'Sin dato anterior';
                     fl.className = 'tasa-fluct';
                 }
                 document.getElementById('tasa-fuente').textContent = tasa.fuente || 'BCV';
             } else {
-                document.getElementById('tasa-valor').textContent = '\\u2014';
+                document.getElementById('tasa-valor').textContent = '\u2014';
                 document.getElementById('tasa-fluct').textContent = 'Sin tasa';
             }
             const pd = document.getElementById('tasa-pendiente');
@@ -308,11 +527,11 @@
             const query = (document.getElementById('buscar-stock').value || '').trim().toLowerCase();
             const sl = document.getElementById('stock-list');
             const sc = document.getElementById('stock-count');
-            
-            const filtrados = listaProductosCache.filter(p => 
+
+            const filtrados = listaProductosCache.filter(p =>
                 p.nombre.toLowerCase().includes(query) || p.sku.toLowerCase().includes(query)
             );
-            
+
             sc.textContent = filtrados.length + ' de ' + listaProductosCache.length;
 
             let h = '';
@@ -340,7 +559,7 @@
             const data = [];
             for (let i = 0; i < len; i++) {
                 const n = top[i].nombre;
-                labels.push(n.length > 12 ? n.slice(0, 12) + '\\u2026' : n);
+                labels.push(n.length > 12 ? n.slice(0, 12) + '\u2026' : n);
                 data.push(Number(top[i].cantidad));
             }
             if (topChart) topChart.destroy();

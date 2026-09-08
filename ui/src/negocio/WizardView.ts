@@ -1,6 +1,20 @@
 import { api, ConfigInfo } from './api';
 import { NegocioModel, RUBRO_ABASTO, RUBRO_LICORERIA, RUBRO_PANADERIA, RUBRO_RETAIL } from './NegocioModel';
 
+function validarClaveLicencia(clave: string, _rubros: number): boolean {
+    const limpio = clave.replace(/[^a-zA-Z0-9]/g, '');
+    if (limpio.length !== 16) return false;
+    const digitos = limpio.split('').map(c => parseInt(c, 10)).filter(d => !isNaN(d) && d < 10);
+    if (digitos.length !== 16) return false;
+    let suma = 0;
+    for (let i = 0; i < 12; i++) {
+        suma += digitos[i] * (i + 1);
+    }
+    const checksum = suma % 10000;
+    const esperado = digitos[12] * 1000 + digitos[13] * 100 + digitos[14] * 10 + digitos[15];
+    return checksum === esperado;
+}
+
 export class WizardView {
     private contenedor: HTMLElement;
     private modelo: NegocioModel;
@@ -45,6 +59,16 @@ export class WizardView {
                             ${this.tarjetaRubro('wz-licoreria', 'Licorería', 'Cuentas y consumo', RUBRO_LICORERIA, 'bg-brand-pink')}
                             ${this.tarjetaRubro('wz-retail', 'Retail', 'Series y garantías', RUBRO_RETAIL, 'bg-purple-100')}
                         </div>
+                    </div>
+
+                    <!-- Clave de Licencia Comercial -->
+                    <div class="border-2 border-brand-black rounded-lg p-4 bg-gray-50 space-y-3">
+                        <span class="block font-heading font-black text-xs uppercase text-brand-black">Clave de Licencia Comercial</span>
+                        <p class="text-xs text-gray-600 font-bold">Ingresa la clave de activación de 16 dígitos proporcionada por DatioLabs. Sin ella, el sistema arranca en modo demo.</p>
+                        <input id="wz-licencia" type="text" maxlength="20" placeholder="Ej: 0001-8888-1111-0000"
+                            class="w-full border-2 border-brand-black rounded px-4 py-2 text-sm font-mono font-bold focus:outline-none focus:ring-2 focus:ring-brand-purple tracking-wider" />
+                        <p id="wz-licencia-error" class="hidden text-red-700 font-bold text-xs">La clave no es válida para los rubros seleccionados.</p>
+                        <p class="text-[10px] text-gray-500 font-bold">Puedes omitir este paso y activar la licencia después desde el Panel del Dueño.</p>
                     </div>
 
                     <!-- Elección de Privacidad de Inventario -->
@@ -258,6 +282,9 @@ export class WizardView {
         const rubros =
             [...this.contenedor.querySelectorAll<HTMLInputElement>('input[type=checkbox]:checked')]
                 .reduce((acc, c) => acc | Number(c.dataset.bit), 0);
+        const licenciaInput = document.getElementById('wz-licencia') as HTMLInputElement | null;
+        const licenciaClave = licenciaInput?.value.trim() || '';
+        const licenciaError = document.getElementById('wz-licencia-error');
 
         if (!nombre || rubros === 0) {
             if (errorBox) {
@@ -273,9 +300,18 @@ export class WizardView {
             }
             return;
         }
+        if (licenciaClave && !validarClaveLicencia(licenciaClave, rubros)) {
+            if (licenciaError) {
+                licenciaError.classList.remove('hidden');
+            }
+            return;
+        }
+        if (licenciaError) {
+            licenciaError.classList.add('hidden');
+        }
 
         try {
-            await this.modelo.inicializar(nombre, rubros, pin);
+            await this.modelo.inicializar(nombre, rubros, pin, licenciaClave);
             const cfg = this.modelo.getConfig();
             if (cfg) this.alTerminar(cfg);
         } catch (e) {

@@ -15,6 +15,12 @@ export { RUBRO_ABASTO, RUBRO_PANADERIA, RUBRO_LICORERIA };
 
 const INTERVALO_TASA_MS = 300_000;
 
+interface QrResult {
+    url: string;
+    qrBase64: string;
+    roomId: string;
+}
+
 class AppController {
     private modelo = new NegocioModel();
     private cajaVm: CajaViewModel | null = null;
@@ -22,6 +28,16 @@ class AppController {
     private widget = new BcvWidget();
     private root!: HTMLElement;
     private modalRoot!: HTMLElement;
+    private peerConnection: RTCPeerConnection | null = null;
+    private dataChannel: RTCDataChannel | null = null;
+    private wsSignaling: WebSocket | null = null;
+
+    private readonly STUN_SERVERS: RTCConfiguration = {
+        iceServers: [
+            { urls: 'stun:stun.cloudflare.com:3478' },
+            { urls: 'stun:stun.l.google.com:19302' },
+        ],
+    };
 
     async arrancar(): Promise<void> {
         const root = document.getElementById('app-root');
@@ -98,7 +114,7 @@ class AppController {
             const btnVentas = crearBtn('btn-ir-ventas', 'VENTAS', 'ventas');
             const btnInventario = crearBtn('btn-ir-inventario', 'INVENTARIO', 'inventario');
             const btnPanel = crearBtn('btn-ir-panel', 'PANEL', 'panel');
-            const btnGuia = crearBtn('btn-ir-guia', 'GUÍA', 'guia');
+            const btnGuia = crearBtn('btn-ir-guia', 'GUIA', 'guia');
 
             const tieneCuentas = cfg.rubros !== 0;
             let btnCuentas: HTMLButtonElement | null = null;
@@ -107,7 +123,6 @@ class AppController {
                 btnCuentas.addEventListener('click', () => void this.arrancarCuentas());
             }
 
-            // Orden mandatorio: CAJA, CUENTAS, VENTAS, INVENTARIO, PANEL, GUÍA
             nav.appendChild(btnCaja);
             if (btnCuentas) nav.appendChild(btnCuentas);
             nav.appendChild(btnVentas);
@@ -279,93 +294,219 @@ class AppController {
     }
 
     private async abrirModalQrMovil(): Promise<void> {
-        const dispositivos = await api.dispositivos();
+        let qrData: QrResult | null = null;
+        try {
+            qrData = await api.generarQr() as unknown as QrResult;
+        } catch (_) {
+            qrData = null;
+        }
+
+        const url = qrData?.url || 'http://127.0.0.1:4000/panel';
+        const qrBase64 = qrData?.qrBase64 || '';
+        const roomId = qrData?.roomId || '';
+
         this.modalRoot.innerHTML = `
         <div class="fixed inset-0 bg-black/40 flex items-center justify-center z-[100] p-4">
             <div class="bg-white border-2 border-brand-black rounded-lg shadow-brutal p-6 w-full max-w-lg">
                 <div class="flex justify-between items-center border-b-2 border-brand-black pb-3 mb-4">
                     <div>
-                        <h3 class="font-heading font-black text-2xl">CONEXIÓN MÓVIL P2P</h3>
-                        <p class="font-body text-xs text-gray-600">Acceso cifrado autenticado por Clave Maestra del Dueño</p>
+                        <h3 class="font-heading font-black text-2xl">CONEXION MOVIL P2P</h3>
+                        <p class="font-body text-xs text-gray-600">WebRTC DataChannel - Funciona dentro y fuera de LAN</p>
                     </div>
                     <button id="qr-cerrar" class="w-8 h-8 rounded border-2 border-brand-black flex items-center justify-center font-black text-lg hover:bg-gray-100">&times;</button>
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    <!-- Columna QR e instrucciones de acceso -->
                     <div class="bg-gray-50 border-2 border-brand-black rounded-lg p-4 text-center flex flex-col items-center justify-between">
                         <div class="w-full">
-                            <span class="text-[10px] font-black uppercase tracking-wider text-gray-500 block mb-1">Escanear para Vincular</span>
+                            <span class="text-[10px] font-black uppercase tracking-wider text-gray-500 block mb-1">Escanear para Conectar P2P</span>
                             <div class="w-36 h-36 mx-auto bg-white border-2 border-brand-black rounded p-2 flex items-center justify-center mb-2">
-                                <svg class="w-32 h-32 text-brand-black" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"/>
-                                </svg>
+                                ${qrBase64
+                                    ? `<img src="data:image/png;base64,${qrBase64}" class="w-full h-full" alt="QR P2P" />`
+                                    : `<svg class="w-32 h-32 text-brand-black" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"/>
+                                    </svg>`
+                                }
                             </div>
-                            <p class="text-[11px] font-bold text-gray-600 mb-1">URL local del terminal:</p>
-                            <p class="font-mono text-[10px] bg-white border border-gray-300 rounded p-1 truncate text-brand-black">http://192.168.1.100:8080/panel</p>
+                            <p class="text-[11px] font-bold text-gray-600 mb-1">URL de conexion:</p>
+                            <p class="font-mono text-[10px] bg-white border border-gray-300 rounded p-1 truncate text-brand-black">${url}</p>
+                            ${roomId ? `<p class="text-[10px] text-gray-400 mt-1 font-mono">Room: ${roomId}</p>` : ''}
                         </div>
-                        <div class="bg-amber-100 border border-brand-black rounded p-2 text-[10px] font-bold text-amber-900 mt-2">
-                            Al conectar solicitará obligatoriamente la Clave del Dueño definida al instalar.
+                        <div class="bg-green-100 border border-brand-black rounded p-2 text-[10px] font-bold text-green-900 mt-2">
+                            WebRTC P2P: Funciona dentro y fuera de LAN con STUN publico.
                         </div>
                     </div>
 
-                    <!-- Columna de Registro manual y simulación de vinculación -->
                     <div class="flex flex-col justify-between">
                         <div>
-                            <h4 class="font-heading font-black text-sm uppercase mb-2">Emparejar Nuevo Dispositivo</h4>
-                            <form id="form-vincular-dev" class="space-y-2 mb-3">
-                                <input id="dev-nombre" placeholder="Nombre (ej: iPhone Carlos)" maxlength="32" class="w-full border-2 border-brand-black rounded px-2.5 py-1.5 text-xs font-bold" required />
-                                <button type="submit" class="w-full bg-brand-yellow hover:bg-yellow-300 text-brand-black font-heading font-black py-2 rounded border-2 border-brand-black text-xs shadow-brutal-sm">
-                                    + VINCULAR TELÉFONO
-                                </button>
-                            </form>
-                            <h4 class="font-heading font-black text-xs uppercase mb-1">Dispositivos Autorizados (${dispositivos.length})</h4>
-                            <div class="space-y-1.5 max-h-36 overflow-y-auto pr-1">
-                                ${dispositivos.map((d) => `
-                                    <div class="border border-brand-black rounded p-2 bg-white flex justify-between items-center text-xs">
-                                        <div class="min-w-0 pr-2">
-                                            <p class="font-black truncate text-brand-black">${d.nombre}</p>
-                                            <p class="text-[10px] text-gray-500 font-mono">${d.ip} · ${d.ultimoAcceso}</p>
-                                        </div>
-                                        <button data-revocar-dev="${d.id}" class="text-[10px] font-black text-red-600 hover:underline shrink-0">
-                                            Desconectar
-                                        </button>
-                                    </div>
-                                `).join('')}
+                            <h4 class="font-heading font-black text-sm uppercase mb-2">Estado de Conexion</h4>
+                            <div id="p2p-status" class="border border-brand-black rounded p-3 bg-white mb-3">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <span class="w-3 h-3 rounded-full bg-yellow-400 border border-brand-black" id="p2p-status-dot"></span>
+                                    <span class="text-xs font-bold" id="p2p-status-text">Esperando conexion del dispositivo movil...</span>
+                                </div>
+                                <p class="text-[10px] text-gray-500">El dispositivo movil escanea el QR y se conecta via WebRTC DataChannel.</p>
+                            </div>
+                            <div class="bg-amber-100 border border-brand-black rounded p-2 text-[10px] font-bold text-amber-900">
+                                La conexion solicitará obligatoriamente la Clave del Dueño definida al instalar.
                             </div>
                         </div>
                     </div>
                 </div>
 
                 <div class="flex justify-between items-center pt-3 border-t-2 border-brand-black text-xs text-gray-500 font-bold">
-                    <span>Sesión tokenizada con HMAC SHA-256</span>
+                    <span>STUN: stun.cloudflare.com | stun.l.google.com</span>
                     <button id="qr-cerrar-btn" class="bg-brand-black text-white px-4 py-2 rounded font-black font-heading text-xs">CERRAR</button>
                 </div>
             </div>
         </div>`;
 
-        const cerrar = () => { this.modalRoot.innerHTML = ''; };
+        const cerrar = () => {
+            this.modalRoot.innerHTML = '';
+            this.desconectarP2P();
+        };
         document.getElementById('qr-cerrar')?.addEventListener('click', cerrar);
         document.getElementById('qr-cerrar-btn')?.addEventListener('click', cerrar);
 
-        document.getElementById('form-vincular-dev')?.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const input = document.getElementById('dev-nombre') as HTMLInputElement | null;
-            if (input?.value.trim()) {
-                await api.registrarDispositivo(input.value.trim());
-                void this.abrirModalQrMovil();
-            }
-        });
+        if (roomId) {
+            this.conectarSignaling(roomId);
+        }
+    }
 
-        this.modalRoot.querySelectorAll('[data-revocar-dev]').forEach((btn) => {
-            btn.addEventListener('click', async () => {
-                const id = (btn as HTMLElement).dataset.revocarDev;
-                if (id) {
-                    await api.revocarDispositivo(id);
-                    void this.abrirModalQrMovil();
+    private conectarSignaling(roomId: string): void {
+        const host = window.location.hostname || '127.0.0.1';
+        const wsUrl = `ws://${host}:4000/ws/signaling?room=${roomId}`;
+
+        try {
+            this.wsSignaling = new WebSocket(wsUrl);
+            this.wsSignaling.onopen = () => {
+                this.actualizarEstadoP2P('connected', 'Conectado al servidor de senalizacion. Creando conexion P2P...');
+                this.crearPeerConnection(roomId);
+            };
+            this.wsSignaling.onmessage = async (event) => {
+                const msg = JSON.parse(event.data);
+                if (msg.type === 'answer' && this.peerConnection) {
+                    await this.peerConnection.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+                    this.actualizarEstadoP2P('connected', 'Conexion P2P establecida');
+                } else if (msg.type === 'ice-candidate' && this.peerConnection) {
+                    try {
+                        await this.peerConnection.addIceCandidate(new RTCIceCandidate(msg.candidate));
+                    } catch (e) {
+                        console.warn('[P2P] ICE candidate error:', e);
+                    }
                 }
-            });
-        });
+            };
+            this.wsSignaling.onclose = () => {
+                this.actualizarEstadoP2P('disconnected', 'Desconectado del servidor de senalizacion');
+            };
+            this.wsSignaling.onerror = () => {
+                this.actualizarEstadoP2P('error', 'Error de conexion al servidor de senalizacion');
+            };
+        } catch (e) {
+            this.actualizarEstadoP2P('error', 'Error al conectar con el servidor');
+        }
+    }
+
+    private async crearPeerConnection(_roomId: string): Promise<void> {
+        this.peerConnection = new RTCPeerConnection(this.STUN_SERVERS);
+
+        this.peerConnection.onicecandidate = (event) => {
+            if (event.candidate && this.wsSignaling && this.wsSignaling.readyState === WebSocket.OPEN) {
+                this.wsSignaling.send(JSON.stringify({
+                    type: 'ice-candidate',
+                    candidate: event.candidate,
+                }));
+            }
+        };
+
+        this.peerConnection.onconnectionstatechange = () => {
+            const state = this.peerConnection?.connectionState;
+            if (state === 'connected') {
+                this.actualizarEstadoP2P('connected', 'P2P Conectado - Dispositivo movil vinculado');
+            } else if (state === 'disconnected' || state === 'failed') {
+                this.actualizarEstadoP2P('disconnected', 'Conexion P2P perdida');
+            }
+        };
+
+        this.dataChannel = this.peerConnection.createDataChannel('api', { ordered: true });
+        this.dataChannel.onopen = () => {
+            this.actualizarEstadoP2P('connected', 'DataChannel abierto - Listo para recibir solicitudes');
+        };
+        this.dataChannel.onclose = () => {
+            this.actualizarEstadoP2P('disconnected', 'DataChannel cerrado');
+        };
+        this.dataChannel.onmessage = (event) => {
+            this.handleDataChannelMessage(event.data);
+        };
+
+        const offer = await this.peerConnection.createOffer();
+        await this.peerConnection.setLocalDescription(offer);
+
+        if (this.wsSignaling && this.wsSignaling.readyState === WebSocket.OPEN) {
+            this.wsSignaling.send(JSON.stringify({
+                type: 'offer',
+                sdp: this.peerConnection.localDescription,
+            }));
+        }
+        this.actualizarEstadoP2P('connecting', 'Oferta P2P enviada, esperando respuesta...');
+    }
+
+    private async handleDataChannelMessage(data: string): Promise<void> {
+        try {
+            const msg = JSON.parse(data);
+            const { id, method, path, body } = msg;
+
+            let statusCode = 200;
+            let responseBody: unknown = null;
+
+            try {
+                const opts: RequestInit = { method: method || 'GET' };
+                if (body) opts.body = body;
+                const res = await fetch(`/api${path}`, {
+                    ...opts,
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                });
+                statusCode = res.status;
+                if (res.status === 401) {
+                    responseBody = { error: 'Unauthorized' };
+                } else {
+                    responseBody = await res.json();
+                }
+            } catch (e) {
+                statusCode = 500;
+                responseBody = { error: String(e) };
+            }
+
+            if (this.dataChannel && this.dataChannel.readyState === 'open') {
+                this.dataChannel.send(JSON.stringify({
+                    id,
+                    status: statusCode,
+                    body: responseBody,
+                }));
+            }
+        } catch (e) {
+            console.error('[P2P] Error handling message:', e);
+        }
+    }
+
+    private actualizarEstadoP2P(estado: string, texto: string): void {
+        const dot = document.getElementById('p2p-status-dot');
+        const text = document.getElementById('p2p-status-text');
+        if (dot) {
+            dot.className = `w-3 h-3 rounded-full border border-brand-black ${
+                estado === 'connected' ? 'bg-green-500' :
+                estado === 'connecting' ? 'bg-yellow-400' :
+                'bg-red-500'
+            }`;
+        }
+        if (text) text.textContent = texto;
+    }
+
+    private desconectarP2P(): void {
+        if (this.dataChannel) { this.dataChannel.close(); this.dataChannel = null; }
+        if (this.peerConnection) { this.peerConnection.close(); this.peerConnection = null; }
+        if (this.wsSignaling) { this.wsSignaling.close(); this.wsSignaling = null; }
     }
 
     private toastError(mensaje: string): void {

@@ -401,4 +401,10 @@ pub struct ConfigNegocio {
     pub nombre: Nombre,
     pub rubros: u16,
     pub pin_dueno_sha256: String,
+    #[serde(default)]
+    pub licencia_clave: String,
+    #[serde(default)]
+    pub licencia_titular: String,
+    #[serde(default)]
+    pub licencia_estado: String,
 }
