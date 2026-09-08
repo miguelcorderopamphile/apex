@@ -48,7 +48,7 @@ use tower_http::cors::{Any, CorsLayer};
 
 const SESSION_TTL_SECS: u64 = 7 * 24 * 3600;
 const SESSION_KEY_PREFIX: &[u8] = b"session:";
-const MAX_SESSIONS: usize = 128;
+const _MAX_SESSIONS: usize = 128;
 
 #[derive(Clone)]
 struct SessionStore {
@@ -173,7 +173,7 @@ fn make_cookie_header(token: &[u8; 32]) -> Option<HeaderValue> {
     HeaderValue::from_str(s).ok()
 }
 
-fn clear_session_cookie() -> &'static str {
+fn _clear_session_cookie() -> &'static str {
     "datiolabs_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0"
 }
 
@@ -860,12 +860,12 @@ fn validar_clave_licencia(clave: &str, rubros: u16) -> bool {
     if limpio.len() != 16 {
         return false;
     }
-    let digitos: Vec<u8> = limpio.bytes().map(|b| b - b'0').filter(|&d| d < 10).collect();
+    let digitos: Vec<u16> = limpio.bytes().map(|b| (b - b'0') as u16).filter(|&d| d < 10).collect();
     if digitos.len() != 16 {
         return false;
     }
     let _rubro_code = rubros & 0x0F;
-    let primeros4 = digitos[0] as u16 * 1000 + digitos[1] as u16 * 100 + digitos[2] as u16 * 10 + digitos[3] as u16;
+    let primeros4 = digitos[0] * 1000 + digitos[1] * 100 + digitos[2] * 10 + digitos[3];
     if primeros4 == 0 {
         return false;
     }
@@ -874,7 +874,7 @@ fn validar_clave_licencia(clave: &str, rubros: u16) -> bool {
         suma += digitos[i] as u32 * (i as u32 + 1);
     }
     let checksum = (suma % 10000) as u16;
-    let esperado = digitos[12] as u16 * 1000 + digitos[13] as u16 * 100 + digitos[14] as u16 * 10 + digitos[15] as u16;
+    let esperado = digitos[12] * 1000 + digitos[13] * 100 + digitos[14] * 10 + digitos[15];
     checksum == esperado
 }
 
