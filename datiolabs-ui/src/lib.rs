@@ -10,7 +10,7 @@ use datiolabs_core::capacidades::{
 use datiolabs_core::db::{Database as Ledger, DbError};
 use datiolabs_core::models::{
     Catalogo, ConfigNegocio, EstadoVenta, LineasVenta, MotivoMovimiento, MovimientoStock,
-    PagoVenta, Producto, Venta,
+    Nombre, PagoVenta, Producto, Venta,
 };
 use datiolabs_core::modulos::licoreria;
 use datiolabs_core::modulos::panaderia::Lote;
@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 
 use tasa_bcv::{ServicioTasa, TasaInfo, iniciar_refresco};
@@ -30,9 +30,9 @@ use uuid::Uuid;
 
 use axum::{
     Router,
-    extract::{FromRequestParts, Request, State as AxumState},
+    extract::{FromRequestParts, Request, State},
     http::{
-        HeaderMap, Method, StatusCode,
+        HeaderMap, HeaderValue, Method, StatusCode,
         header::{COOKIE, SET_COOKIE},
     },
     middleware::{self, Next},
@@ -44,12 +44,10 @@ use futures::stream::Stream;
 use rand::Rng;
 use std::convert::Infallible;
 use std::sync::Mutex as StdMutex;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::broadcast;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
 
-const SESSION_COOKIE_NAME: &str = "datiolabs_session";
 const SESSION_TTL_SECS: u64 = 7 * 24 * 3600;
 const SESSION_KEY_PREFIX: &[u8] = b"session:";
 const MAX_SESSIONS: usize = 128;
@@ -76,10 +74,10 @@ impl SessionStore {
     }
 
     fn create(&self) -> Result<[u8; 32], UIError> {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut token = [0u8; 32];
         for b in &mut token {
-            *b = rng.sample(rand::distributions::Alphanumeric);
+            *b = rng.sample(rand::distr::Alphanumeric);
         }
         let now = Self::now_unix()?;
         let expiry = (now + SESSION_TTL_SECS as i64).to_be_bytes();
