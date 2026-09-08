@@ -62,7 +62,7 @@ class AppController {
         window.setInterval(() => void this.refrescarTasa(), INTERVALO_TASA_MS);
 
         if (!cfg) {
-            new WizardView(this.root, this.modelo, () => void this.arrancarCaja()).render();
+            new WizardView(this.root, this.modelo, () => void this.arrancar()).render();
             return;
         }
         this.pintarBotonesRol(cfg);
