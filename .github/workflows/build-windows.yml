@@ -44,8 +44,10 @@ jobs:
           npm run build
 
       - name: Install Tauri CLI
-        run: |
-          cargo install tauri-cli --version "^2.0.0" --locked
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install Tauri CLI binary
+        run: cargo binstall --no-confirm tauri-cli@^2.0.0
 
       - name: Build Tauri Windows Installer
         run: |
