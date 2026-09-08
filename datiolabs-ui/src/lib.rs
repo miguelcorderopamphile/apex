@@ -1,6 +1,6 @@
 mod error;
 mod tasa_bcv;
-#[cfg_attr(
+#![cfg_attr(
     all(not(debug_assertions), target_os = "windows"),
     windows_subsystem = "windows"
 )]
@@ -10,7 +10,7 @@ use datiolabs_core::capacidades::{
 use datiolabs_core::db::{Database as Ledger, DbError};
 use datiolabs_core::models::{
     Catalogo, ConfigNegocio, EstadoVenta, LineasVenta, MotivoMovimiento, MovimientoStock,
-    Nombre, PagoVenta, Producto, Venta,
+    Nombre, PagoVenta, Producto, Sku, Venta,
 };
 use datiolabs_core::modulos::licoreria;
 use datiolabs_core::modulos::panaderia::Lote;
@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 
 use tasa_bcv::{ServicioTasa, TasaInfo, iniciar_refresco};
@@ -30,7 +30,7 @@ use uuid::Uuid;
 
 use axum::{
     Router,
-    extract::{FromRequestParts, Request, State},
+    extract::{Request, State},
     http::{
         HeaderMap, HeaderValue, Method, StatusCode,
         header::{COOKIE, SET_COOKIE},
@@ -43,10 +43,8 @@ use axum::{
 use futures::stream::Stream;
 use rand::Rng;
 use std::convert::Infallible;
-use std::sync::Mutex as StdMutex;
 use tokio::sync::broadcast;
 use tower_http::cors::{Any, CorsLayer};
-use tower_http::services::ServeDir;
 
 const SESSION_TTL_SECS: u64 = 7 * 24 * 3600;
 const SESSION_KEY_PREFIX: &[u8] = b"session:";
@@ -344,8 +342,8 @@ async fn api_panel(State(state): State<AxumAppState>) -> Result<Json<PanelDto>, 
     for i in 0..catalogo.len() {
         if catalogo.stock(i) <= dec!(5) && criticos_len < MAX_CRITICOS {
             criticos[criticos_len] = CriticoDto {
-                sku: Sku::from_slice(catalogo.sku(i).as_bytes()),
-                nombre: Nombre::from_slice(catalogo.nombre(i).as_bytes()),
+                sku: catalogo.sku_obj(i),
+                nombre: catalogo.nombre_obj(i),
                 stock: catalogo.stock(i),
             };
             criticos_len += 1;
@@ -449,8 +447,8 @@ async fn api_productos(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let filas = (0..catalogo.len())
         .map(|i| ProductoDto {
-            sku: Sku::from_slice(catalogo.sku(i).as_bytes()),
-            nombre: Nombre::from_slice(catalogo.nombre(i).as_bytes()),
+            sku: catalogo.sku_obj(i),
+            nombre: catalogo.nombre_obj(i),
             precio_usd: catalogo.precio_usd(i),
             impuesto_pct: catalogo.impuesto_pct(i),
             stock: catalogo.stock(i),
@@ -460,6 +458,7 @@ async fn api_productos(
     Ok(Json(filas))
 }
 
+#[derive(Clone)]
 struct AppState {
     ledger: Arc<Mutex<Ledger>>,
     servicio_tasa: Arc<ServicioTasa>,
@@ -612,7 +611,7 @@ struct CuentaDto {
     total_parcial_bs: Decimal,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CriticoDto {
     sku: Sku,
@@ -620,7 +619,7 @@ struct CriticoDto {
     stock: Decimal,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TopProductoDto {
     nombre: Nombre,
@@ -663,8 +662,8 @@ fn config_requerida(estado: &AppState) -> Result<ConfigNegocio, UIError> {
     })
 }
 
-fn catalogo_fresco(db: &Ledger) -> Result<Catalogo, UIError> {
-    Ok(db.cargar_catalogo()?)
+fn catalogo_fresco(db: &Ledger) -> Result<Catalogo, DbError> {
+    db.cargar_catalogo()
 }
 
 fn tasa_viva(estado: &AppState) -> Result<Decimal, UIError> {
@@ -731,7 +730,7 @@ fn obtener_config(estado: tauri::State<AppState>) -> Result<Option<ConfigDto>, U
     Ok(cfg.map(|c| ConfigDto {
         capacidades: capacidades_de_rubros(c.rubros),
         tiene_pin: !c.pin_dueno_sha256.is_empty(),
-        nombre: c.nombre,
+        nombre: c.nombre.as_str().to_string(),
         rubros: c.rubros,
     }))
 }
@@ -743,16 +742,19 @@ fn inicializar_negocio(
     rubros: u8,
     pin_dueno: Option<String>,
 ) -> Result<(), UIError> {
-    if !rubros_activos(rubros) {
+    let rubros_u16 = rubros as u16;
+    if !rubros_activos(rubros_u16) {
         return Err(UIError::new(
             "seleccion de rubros invalida",
             "Active al menos un rubro conocido (abasto, panaderia, licoreria)",
         ));
     }
+    let nombre_obj = Nombre::new(&nombre)
+        .map_err(|e| UIError::new("nombre invalido", e))?;
     con_ledger(&estado, |db| {
         db.guardar_config(&ConfigNegocio {
-            nombre,
-            rubros,
+            nombre: nombre_obj,
+            rubros: rubros_u16,
             pin_dueno_sha256: pin_dueno.map(|p| hash_pin(&p)).unwrap_or_default(),
         })
     })?;
@@ -807,8 +809,8 @@ fn listar_productos(estado: tauri::State<AppState>) -> Result<Vec<ProductoDto>, 
     let catalogo = con_ledger(&estado, catalogo_fresco)?;
     let filas = (0..catalogo.len())
         .map(|i| ProductoDto {
-            sku: Sku::from_slice(catalogo.sku(i).as_bytes()),
-            nombre: Nombre::from_slice(catalogo.nombre(i).as_bytes()),
+            sku: catalogo.sku_obj(i),
+            nombre: catalogo.nombre_obj(i),
             precio_usd: catalogo.precio_usd(i),
             impuesto_pct: catalogo.impuesto_pct(i),
             stock: catalogo.stock(i),
@@ -835,7 +837,7 @@ fn compra_stock(
         MotivoMovimiento::Compra,
         None,
     );
-    let nuevo_stock = con_ledger(&estado, |db| {
+    let nuevo_stock = con_ledger(&estado, |db| -> Result<Decimal, DbError> {
         db.aplicar_movimiento(mov, |_, _| {})?;
         let cat = db.cargar_catalogo()?;
         let idx = cat
@@ -861,9 +863,9 @@ fn registrar_merma(
     let sku_norm = sku.trim().to_uppercase();
 
     if let Some(lid) = lote_id {
-        let (_, restante) = con_ledger(&estado, |db| {
+        let (_, restante) = con_ledger(&estado, |db| -> Result<(String, Decimal), DbError> {
             let mut libro = db.cargar_lotes()?;
-            let restante = libro.registrar_merma(&lid, cant)?;
+            let restante = libro.registrar_merma(&lid, cant).map_err(DbError::Negocio)?;
             Ok((lid.clone(), restante))
         })?;
         con_ledger(&estado, |db| db.actualizar_disponible_lote(&lid, restante))?;
@@ -946,8 +948,8 @@ fn registrar_venta(
             validar_linea(catalogo.capacidades(idx), cantidad, catalogo.stock(idx))?;
             toques.push((idx, cantidad));
             lineas.agregar(
-                Sku::from_slice(catalogo.sku(idx).as_bytes()),
-                Nombre::from_slice(catalogo.nombre(idx).as_bytes()),
+                catalogo.sku_obj(idx),
+                catalogo.nombre_obj(idx),
                 cantidad,
                 catalogo.precio_usd(idx),
                 tasa,
@@ -1169,8 +1171,8 @@ fn agregar_consumo(
         validar_linea(catalogo.capacidades(idx), cant, catalogo.stock(idx))?;
 
         venta.lineas.agregar(
-            Sku::from_slice(catalogo.sku(idx).as_bytes()),
-            Nombre::from_slice(catalogo.nombre(idx).as_bytes()),
+            catalogo.sku_obj(idx),
+            catalogo.nombre_obj(idx),
             cant,
             catalogo.precio_usd(idx),
             tasa,
@@ -1356,8 +1358,8 @@ fn datos_panel(estado: tauri::State<AppState>) -> Result<PanelDto, UIError> {
         for i in 0..catalogo.len() {
             if catalogo.stock(i) <= dec!(5) && criticos_len < MAX_CRITICOS {
                 criticos[criticos_len] = CriticoDto {
-                    sku: Sku::from_slice(catalogo.sku(i).as_bytes()),
-                    nombre: Nombre::from_slice(catalogo.nombre(i).as_bytes()),
+                    sku: catalogo.sku_obj(i),
+                    nombre: catalogo.nombre_obj(i),
                     stock: catalogo.stock(i),
                 };
                 criticos_len += 1;
@@ -1483,7 +1485,7 @@ struct QrData {
 }
 
 #[tauri::command]
-fn generar_qr_panel(state: tauri::State<AppState>) -> Result<QrData, UIError> {
+fn generar_qr_panel(_state: tauri::State<AppState>) -> Result<QrData, UIError> {
     let ip = get_lan_ip()?;
     let url = format!("http://{}:4000/panel", ip);
 
@@ -1504,7 +1506,8 @@ fn generar_qr_panel(state: tauri::State<AppState>) -> Result<QrData, UIError> {
         )
         .map_err(|e| UIError::new("error codificando PNG", &e.to_string()))?;
 
-    let qr_base64 = base64::encode(&png_bytes);
+    use base64::Engine;
+    let qr_base64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
     Ok(QrData { url, qr_base64 })
 }
 
@@ -1513,7 +1516,7 @@ fn abrir_panel_movil(app: tauri::AppHandle) -> Result<(), UIError> {
     let ip = get_lan_ip()?;
     let url = format!("http://{}:4000/panel", ip);
     let webview_url = url
-        .parse()
+        .parse::<tauri::Url>()
         .map_err(|e| UIError::new("error parseando URL", &e.to_string()))?;
 
     tauri::WebviewWindowBuilder::new(
@@ -1691,10 +1694,15 @@ pub fn run() {
             let ledger_arc = Arc::new(Mutex::new(ledger));
             let servicio_tasa = Arc::new(ServicioTasa::new(ruta_cache, ledger_arc.clone())?);
 
+            let db_sled = ledger_arc
+                .lock()
+                .map_err(|_| UIError::new("error de bloqueo", "fallo al bloquear base de datos"))?
+                .inner_db();
+
             let app_state = AppState {
                 ledger: ledger_arc.clone(),
                 servicio_tasa: servicio_tasa.clone(),
-                session_store: SessionStore::new(&ledger_arc.inner_db())?,
+                session_store: SessionStore::new(&db_sled)?,
             };
 
             app.manage(app_state.clone());

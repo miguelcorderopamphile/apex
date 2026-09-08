@@ -210,8 +210,16 @@ impl Catalogo {
         self.skus[idx].as_str()
     }
 
+    pub fn sku_obj(&self, idx: usize) -> Sku {
+        self.skus[idx]
+    }
+
     pub fn nombre(&self, idx: usize) -> &str {
         self.nombres[idx].as_str()
+    }
+
+    pub fn nombre_obj(&self, idx: usize) -> Nombre {
+        self.nombres[idx]
     }
 
     pub fn precio_usd(&self, idx: usize) -> Decimal {

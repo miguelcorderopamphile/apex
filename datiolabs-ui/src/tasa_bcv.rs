@@ -1,6 +1,6 @@
 use crate::error::UIError;
 use datiolabs_core::db::Database as Ledger;
-use datiolabs_core::models::EventoTasaBcv;
+use datiolabs_core::models::{EventoTasaBcv, MAX_FUENTE_LEN};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -14,6 +14,13 @@ const URL_BCV: &str = "https://www.bcv.org.ve/";
 const FUENTE: &str = "BCV";
 const INTERVALO_REFRESCHO_SEG: u64 = 3600;
 const TIMEOUT_HTTP_SEG: u64 = 30;
+
+fn fuente_bytes(s: &str) -> ([u8; MAX_FUENTE_LEN], u8) {
+    let mut buf = [0u8; MAX_FUENTE_LEN];
+    let len = s.len().min(MAX_FUENTE_LEN);
+    buf[..len].copy_from_slice(&s.as_bytes()[..len]);
+    (buf, len as u8)
+}
 
 static SELECTOR_DIV: LazyLock<Option<Selector>> =
     LazyLock::new(|| Selector::parse("div.recuadrotsmc").ok());
@@ -71,7 +78,8 @@ impl ServicioTasa {
             ledger
                 .lock()
                 .ok()
-                .and_then(|db| db.ultima_tasa().ok().flatten())
+                .and_then(|db| db.ultimas_tasas(1).ok())
+                .and_then(|tasas| tasas.into_iter().next())
                 .map(|t| CacheTasa {
                     valor: t.valor_bs_por_usd,
                     fecha_unix: t.fecha_unix,
@@ -94,22 +102,36 @@ impl ServicioTasa {
             .snapshot
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let Some(activa) = guardia.actual.as_ref() else {
-            return TasaInfo {
-                valor: Decimal::ZERO,
-                fecha_unix: 0,
-                fluctuacion_pct: None,
-                direccion: None,
-            };
+        let actual = match &guardia.actual {
+            Some(a) => a,
+            None => {
+                return TasaInfo {
+                    valor: Decimal::ZERO,
+                    fecha_unix: 0,
+                    fluctuacion_pct: None,
+                    direccion: None,
+                };
+            }
         };
-        let (valor, fecha_unix) = (activa.valor, activa.fecha_unix);
-        drop(guardia);
-
-        let fluctuacion_pct = calcular_fluctuacion(valor, self.anterior_conocida());
-        let direccion = fluctuacion_pct.map(direccion_desde_fluctuacion);
+        let direccion = guardia.anterior.map(|prev| {
+            if actual.valor > prev {
+                DireccionTasa::Subio
+            } else if actual.valor < prev {
+                DireccionTasa::Bajo
+            } else {
+                DireccionTasa::Estable
+            }
+        });
+        let fluctuacion_pct = guardia.anterior.and_then(|prev| {
+            if prev.is_zero() {
+                None
+            } else {
+                Some(((actual.valor - prev) / prev) * Decimal::from(100))
+            }
+        });
         TasaInfo {
-            valor,
-            fecha_unix,
+            valor: actual.valor,
+            fecha_unix: actual.fecha_unix,
             fluctuacion_pct,
             direccion,
         }
@@ -143,21 +165,13 @@ impl ServicioTasa {
         Ok(self.info_actual())
     }
 
-    pub fn tasa_pendiente(&self) -> Option<TasaInfo> {
-        let guardia = self
-            .snapshot
+    pub fn tasa_pendiente(&self) -> Option<Decimal> {
+        self.snapshot
             .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        guardia.pendiente.as_ref().map(|p| {
-            let fluctuacion_pct = calcular_fluctuacion(p.valor, self.anterior_conocida());
-            let direccion = fluctuacion_pct.map(direccion_desde_fluctuacion);
-            TasaInfo {
-                valor: p.valor,
-                fecha_unix: p.fecha_unix,
-                fluctuacion_pct,
-                direccion,
-            }
-        })
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .pendiente
+            .as_ref()
+            .map(|p| p.valor)
     }
 
     pub fn aplicar_tasa_pendiente(&self) -> Result<TasaInfo, UIError> {
@@ -165,18 +179,23 @@ impl ServicioTasa {
             .snapshot
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let Some(pendiente) = guardia.pendiente.take() else {
-            return Err(UIError::new(
-                "sin tasa pendiente",
-                "No hay tasa scrappeada por confirmar",
-            ));
+        let pendiente = match guardia.pendiente.take() {
+            Some(p) => p,
+            None => {
+                return Err(UIError::new(
+                    "sin tasa pendiente",
+                    "No hay tasa scrappeada por confirmar",
+                ));
+            }
         };
 
         if let Some(db) = self.ledger.lock().ok().as_deref() {
+            let (fuente_arr, fuente_len) = fuente_bytes(FUENTE);
             db.insertar_tasa(EventoTasaBcv {
                 valor_bs_por_usd: pendiente.valor,
                 fecha_unix: pendiente.fecha_unix,
-                fuente: FUENTE.to_string(),
+                fuente: fuente_arr,
+                fuente_len,
                 firma_sha256: String::new(),
             })?;
         }
@@ -203,10 +222,12 @@ impl ServicioTasa {
             .unwrap_or_default();
 
         if let Some(db) = self.ledger.lock().ok().as_deref() {
+            let (fuente_arr, fuente_len) = fuente_bytes("MANUAL");
             db.insertar_tasa(EventoTasaBcv {
                 valor_bs_por_usd: valor,
                 fecha_unix,
-                fuente: "MANUAL".to_string(),
+                fuente: fuente_arr,
+                fuente_len,
                 firma_sha256: String::new(),
             })?;
         }

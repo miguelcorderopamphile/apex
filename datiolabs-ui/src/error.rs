@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct UIError {
     pub message: String,
     pub diagnosis: String,
