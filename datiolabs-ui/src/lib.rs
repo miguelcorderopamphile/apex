@@ -1,9 +1,6 @@
 mod error;
 mod tasa_bcv;
-#![cfg_attr(
-    all(not(debug_assertions), target_os = "windows"),
-    windows_subsystem = "windows"
-)]
+
 use datiolabs_core::capacidades::{
     self, ErrorNegocio, capacidades_de_rubros, rubros_activos, validar_linea,
 };
@@ -1707,7 +1704,7 @@ pub fn run() {
 
             app.manage(app_state.clone());
 
-            iniciar_refresco(servicio_tasa);
+            iniciar_refresco(servicio_tasa.clone());
 
             let session_store = app_state.session_store.clone();
             let ledger_for_axum = ledger_arc.clone();
