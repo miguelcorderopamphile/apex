@@ -865,10 +865,6 @@ fn validar_clave_licencia(clave: &str, rubros: u16) -> bool {
         return false;
     }
     let _rubro_code = rubros & 0x0F;
-    let primeros4 = digitos[0] * 1000 + digitos[1] * 100 + digitos[2] * 10 + digitos[3];
-    if primeros4 == 0 {
-        return false;
-    }
     let mut suma: u32 = 0;
     for i in 0..12 {
         suma += digitos[i] as u32 * (i as u32 + 1);
