@@ -98,13 +98,7 @@ export class WizardView {
                         </div>
                     </div>
 
-                    <!-- Clave de Activación de Licencia -->
-                    <div class="border-2 border-brand-black rounded-lg p-4 bg-gray-50 space-y-2">
-                        <label class="block font-heading font-black text-xs uppercase tracking-wide">Clave de Licencia DatioLabs *</label>
-                        <input id="wz-licencia-key" type="text" maxlength="16" placeholder="0000XXXXXXXX0000" value="0000888811110000"
-                            class="w-full border-2 border-brand-black rounded px-4 py-2 font-mono font-black text-sm uppercase focus:outline-none focus:ring-2 focus:ring-brand-purple bg-white" />
-                        <p class="text-[10px] text-gray-500 font-bold">Licorería: 0000888811110000 · Panadería: 0000888822220000 · Retail: 0000888833330000</p>
-                    </div>
+
 
                     <div id="wz-error" class="hidden bg-red-100 border-2 border-red-600 text-red-800 rounded px-4 py-3 font-bold text-sm"></div>
 
@@ -178,13 +172,13 @@ export class WizardView {
         this.conectarEventos();
     }
 
-    private tarjetaRubro(id: string, titulo: string, desc: string, bit: number, color: string): string {
+    private tarjetaRubro(id: string, titulo: string, desc: string, bit: number, color: string, checked: boolean = false): string {
         return `
-        <label for="${id}" class="cursor-pointer block">
-            <div class="border-2 border-brand-black rounded-lg p-3 ${color} bg-opacity-20 hover:bg-opacity-40 transition-all hover:-translate-y-0.5 shadow-brutal-sm">
+        <label for="${id}" class="cursor-pointer block select-none">
+            <div class="border-2 border-brand-black rounded-lg p-3 ${color} bg-opacity-30 hover:bg-opacity-50 transition-all hover:-translate-y-0.5 shadow-brutal-sm">
                 <div class="flex items-center justify-between">
                     <span class="font-heading font-black text-sm text-brand-black">${titulo}</span>
-                    <input type="checkbox" id="${id}" data-bit="${bit}" class="w-5 h-5 accent-brand-black cursor-pointer border-2 border-brand-black rounded" />
+                    <input type="checkbox" id="${id}" data-bit="${bit}" ${checked ? 'checked' : ''} class="w-5 h-5 accent-brand-black cursor-pointer border-2 border-brand-black rounded" />
                 </div>
                 <p class="text-xs text-brand-text font-body mt-1 font-bold">${desc}</p>
             </div>
