@@ -139,7 +139,7 @@ fn extract_session_token(headers: &HeaderMap) -> Option<[u8; 32]> {
 
 async fn auth_middleware(
     State(session_store): State<SessionStore>,
-    mut request: Request,
+    request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
     let token = extract_session_token(request.headers()).ok_or(StatusCode::UNAUTHORIZED)?;
@@ -872,7 +872,7 @@ fn registrar_merma(
     }
 
     let mov = movimiento(&sku_norm, -cant, MotivoMovimiento::Merma, None);
-    let nuevo_stock = con_ledger(&estado, |db| {
+    let nuevo_stock = con_ledger(&estado, |db| -> Result<Decimal, DbError> {
         db.aplicar_movimiento(mov, |_, _| {})?;
         let cat = db.cargar_catalogo()?;
         let idx = cat
@@ -1270,7 +1270,7 @@ fn cerrar_cuenta(
 #[tauri::command]
 fn datos_panel(estado: tauri::State<AppState>) -> Result<PanelDto, UIError> {
     config_requerida(&estado)?;
-    con_ledger(&estado, |db| {
+    con_ledger(&estado, |db| -> Result<PanelDto, DbError> {
         let catalogo = db.cargar_catalogo()?;
         let limite = ahora_unix() - 86_400;
         let ventas = db.ventas_recientes(2_000)?;

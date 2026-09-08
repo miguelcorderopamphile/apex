@@ -165,13 +165,21 @@ impl ServicioTasa {
         Ok(self.info_actual())
     }
 
-    pub fn tasa_pendiente(&self) -> Option<Decimal> {
-        self.snapshot
+    pub fn tasa_pendiente(&self) -> Option<TasaInfo> {
+        let guardia = self
+            .snapshot
             .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .pendiente
-            .as_ref()
-            .map(|p| p.valor)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        guardia.pendiente.as_ref().map(|p| {
+            let fluctuacion_pct = calcular_fluctuacion(p.valor, self.anterior_conocida());
+            let direccion = fluctuacion_pct.map(direccion_desde_fluctuacion);
+            TasaInfo {
+                valor: p.valor,
+                fecha_unix: p.fecha_unix,
+                fluctuacion_pct,
+                direccion,
+            }
+        })
     }
 
     pub fn aplicar_tasa_pendiente(&self) -> Result<TasaInfo, UIError> {
