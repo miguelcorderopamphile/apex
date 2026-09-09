@@ -4,7 +4,7 @@ mod tasa_bcv;
 use datiolabs_core::capacidades::{
     self, ErrorNegocio, capacidades_de_rubros, rubros_activos, validar_linea,
 };
-use datiolabs_core::db::{Database as Ledger, DbError};
+use datiolabs_core::db::{BackupMetadata, Database as Ledger, DbError};
 use datiolabs_core::models::{
     Catalogo, Categoria, ConfigNegocio, DispositivoRemoto, EstadoVenta, Jornada, LineasVenta,
     MetodoPagoConfig, MotivoMovimiento, MovimientoStock, Nombre, Operador, PagoVenta, Producto,
@@ -37,7 +37,7 @@ use axum::{
     middleware::{self, Next},
     response::sse::{Event, Sse},
     response::{Html, IntoResponse, Json, Response},
-    routing::{get, post},
+    routing::{delete, get, post, put},
 };
 use futures::stream::Stream;
 use futures::{SinkExt, StreamExt};
@@ -518,6 +518,13 @@ async fn api_productos(
             impuesto_pct: catalogo.impuesto_pct(i),
             stock: catalogo.stock(i),
             capacidades: catalogo.capacidades(i),
+            categoria_id: None,
+            precio_bruto_usd: None,
+            margen_pct: None,
+            sin_stock: false,
+            unidad: None,
+            es_caja: false,
+            unidades_por_caja: None,
         })
         .collect();
     Ok(Json(filas))
@@ -526,7 +533,6 @@ async fn api_productos(
 // ---------------- Axum handlers: escritura ----------------
 
 use axum::extract::{Path, Query};
-use std::collections::HashMap;
 
 async fn api_cuentas_abrir(
     State(state): State<AxumAppState>,
@@ -786,10 +792,11 @@ async fn api_ventas_registrar(
         }
     }
     let total_bs = lineas.total_bs();
+    let total_usd = lineas.total_usd();
     let venta = datiolabs_core::models::Venta {
         id: uuid::Uuid::new_v4().to_string(), etiqueta: String::new(),
         es_cuenta_abierta: false, estado: datiolabs_core::models::EstadoVenta::Cerrada,
-        lineas, tasa_del_dia: tasa, total_usd: lineas.total_usd(), total_bs,
+        lineas, tasa_del_dia: tasa, total_usd, total_bs,
         monto_recibido_bs: total_bs, vuelto_bs: rust_decimal::Decimal::ZERO,
         pagos: Vec::new(), estado_vuelto: Some("SIN_VUELTO".to_string()),
         metodo_vuelto: None, monto_vuelto_usd: None, tasa_vuelto: None,
@@ -1034,9 +1041,20 @@ async fn api_pin_cambiar(State(state): State<AxumAppState>, Json(body): Json<Has
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
+// Privacidad de inventario
+async fn api_config_privacidad(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, bool>>) -> Result<Json<serde_json::Value>, StatusCode> {
+    let valor = body.get("privacidadInventario").copied().unwrap_or(false);
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut cfg = db.cargar_config().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.ok_or(StatusCode::NOT_FOUND)?;
+    cfg.privacidad_inventario = valor;
+    db.actualizar_config(&cfg).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db); let _ = state.tx.send(());
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
 // Respaldos
 async fn api_respaldos_listar(State(_state): State<AxumAppState>) -> Result<Json<Vec<serde_json::Value>>, StatusCode> {
-    Ok(Json(serde_json::json!([])))
+    Ok(Json(Vec::<serde_json::Value>::new()))
 }
 async fn api_respaldos_crear(State(state): State<AxumAppState>) -> Result<Json<serde_json::Value>, StatusCode> {
     let _ = state.tx.send(());
@@ -1119,6 +1137,7 @@ struct ConfigDto {
     tiene_pin: bool,
     licencia_estado: String,
     licencia_titular: String,
+    privacidad_inventario: bool,
 }
 
 #[derive(Deserialize)]
@@ -1130,6 +1149,20 @@ struct ProductoInput {
     impuesto_pct: String,
     stock_inicial: String,
     pesable: bool,
+    #[serde(default)]
+    categoria_id: Option<String>,
+    #[serde(default)]
+    precio_bruto_usd: Option<String>,
+    #[serde(default)]
+    margen_pct: Option<String>,
+    #[serde(default)]
+    sin_stock: Option<bool>,
+    #[serde(default)]
+    unidad: Option<String>,
+    #[serde(default)]
+    es_caja: Option<bool>,
+    #[serde(default)]
+    unidades_por_caja: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -1364,6 +1397,7 @@ fn obtener_config(estado: tauri::State<AppState>) -> Result<Option<ConfigDto>, U
         rubros: c.rubros,
         licencia_estado: c.licencia_estado,
         licencia_titular: c.licencia_titular,
+        privacidad_inventario: c.privacidad_inventario,
     }))
 }
 
@@ -1375,6 +1409,7 @@ fn inicializar_negocio(
     pin_dueno: Option<String>,
     licencia_clave: Option<String>,
     licencia_titular: Option<String>,
+    privacidad_inventario: Option<bool>,
 ) -> Result<(), UIError> {
     let rubros_u16 = rubros as u16;
     if !rubros_activos(rubros_u16) {
@@ -1398,6 +1433,7 @@ fn inicializar_negocio(
             licencia_clave: clave,
             licencia_titular: titular,
             licencia_estado: estado_lic,
+            privacidad_inventario: privacidad_inventario.unwrap_or(false),
         })
     })?;
     Ok(())
@@ -1655,7 +1691,7 @@ fn registrar_venta(
     let tasa = tasa_viva(&estado)?;
     let recibido = decimal_de(&monto_recibido_bs)?;
 
-    con_ledger(&estado, |db| {
+    let resultado = con_ledger(&estado, |db| {
         let catalogo = catalogo_fresco(db)?;
         let mut lineas = LineasVenta::nuevas();
         let mut toques: Vec<(usize, Decimal)> = Vec::with_capacity(items.len());
@@ -3011,7 +3047,7 @@ fn restaurar_desde_respaldo(
             .to_string()
     });
     let payload = BackupRuta { ruta };
-    importar_backup(state, payload)
+    importar_backup(state, payload).map(|_| true)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -3106,6 +3142,7 @@ pub fn run() {
                     .route("/api/semaforo", get(api_semaforo_obtener))
                     .route("/api/semaforo", post(api_semaforo_guardar))
                     .route("/api/pin/cambiar", post(api_pin_cambiar))
+                    .route("/api/config/privacidad", post(api_config_privacidad))
                     .route("/api/respaldos", get(api_respaldos_listar))
                     .route("/api/respaldos", post(api_respaldos_crear))
                     .route("/api/respaldos/restaurar", post(api_respaldos_restaurar))

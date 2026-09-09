@@ -311,7 +311,9 @@ export class WizardView {
         }
 
         try {
-            await this.modelo.inicializar(nombre, rubros, pin, licenciaClave);
+            const privInvRadio = document.getElementById('priv-inv-abierto') as HTMLInputElement | null;
+            const privacidadInventario = privInvRadio?.checked ?? false;
+            await this.modelo.inicializar(nombre, rubros, pin, licenciaClave, privacidadInventario);
             const cfg = this.modelo.getConfig();
             if (cfg) this.alTerminar(cfg);
         } catch (e) {

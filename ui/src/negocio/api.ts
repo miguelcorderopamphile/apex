@@ -45,6 +45,7 @@ export interface ConfigInfo {
     tienePin: boolean;
     licenciaEstado?: string;
     licenciaTitular?: string;
+    privacidadInventario?: boolean;
 }
 
 export interface TasaImpuesto {
@@ -922,6 +923,7 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
                 tienePin: pin.length > 0,
                 licenciaEstado: licClave ? 'activa' : 'demo',
                 licenciaTitular: licClave ? 'Empresa DatioLabs' : '',
+                privacidadInventario: Boolean(args?.privacidadInventario),
             };
             demoStore.licencia.claveLicencia = licClave || '0000888811110000';
             demoStore.licencia.estado = licClave ? 'activa' : 'demo';
@@ -1830,8 +1832,8 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
 
 export const api = {
     config: () => invocar<ConfigInfo | null>('obtener_config'),
-    inicializar: (nombre: string, rubros: number, pin: string, licenciaClave?: string) =>
-        invocar<void>('inicializar_negocio', { nombre, rubros, pinDueno: pin || null, licenciaClave: licenciaClave || null, licenciaTitular: null }),
+    inicializar: (nombre: string, rubros: number, pin: string, licenciaClave?: string, privacidadInventario?: boolean) =>
+        invocar<void>('inicializar_negocio', { nombre, rubros, pinDueno: pin || null, licenciaClave: licenciaClave || null, licenciaTitular: null, privacidadInventario: privacidadInventario ?? false }),
     validarPin: (pin: string) => invocar<boolean>('validar_pin_dueno', { pin }),
     productos: () => invocar<ProductoInfo[]>('listar_productos'),
     crearProducto: (p: {
@@ -1895,6 +1897,12 @@ export const api = {
     generarQr: () => invocar<{ url: string; qrBase64: string; roomId: string }>('generar_qr_panel'),
     cambiarPinDueno: (pinAnterior: string, pinNuevo: string) =>
         invocar<boolean>('cambiar_pin_dueno', { pinAnterior, pinNuevo }),
+    actualizarPrivacidadInventario: (privacidadInventario: boolean) =>
+        fetch('/api/config/privacidad', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ privacidadInventario }),
+        }).then(r => r.json()),
     tasa: () => invocar<TasaActual>('obtener_tasa_bcv'),
     historicoTasas: () => invocar<RegistroHistoricoTasa[]>('listar_historico_tasas'),
     forzarTasa: () => invocar<TasaActual>('forzar_actualizacion_tasa'),
