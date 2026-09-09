@@ -758,24 +758,63 @@ async fn api_cuentas_cerrar(
     let mut venta = db.cargar_venta(&id).ok().flatten()
         .filter(|v| v.es_cuenta_abierta && v.estado == datiolabs_core::models::EstadoVenta::Abierta)
         .ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
-    let total_usd = venta.lineas.total_usd();
-    let total_bs = venta.lineas.total_bs();
+    let total_bruto_usd = venta.lineas.total_usd();
+    let abonos_usd = venta.abonos_usd.unwrap_or(rust_decimal::Decimal::ZERO);
+    let total_neto_usd = if abonos_usd > total_bruto_usd { rust_decimal::Decimal::ZERO } else { total_bruto_usd - abonos_usd };
+    let tasa = state.servicio_tasa.info_actual().valor;
+    let total_neto_bs = if tasa > rust_decimal::Decimal::ZERO { total_neto_usd * tasa } else { venta.lineas.total_bs() };
     let es_deuda = venta.tipo == "deuda";
     venta.estado = datiolabs_core::models::EstadoVenta::Cerrada;
-    venta.total_usd = total_usd;
-    venta.total_bs = total_bs;
+    venta.total_usd = total_neto_usd;
+    venta.total_bs = total_neto_bs;
     venta.monto_recibido_bs = recibido;
-    venta.vuelto_bs = if recibido > total_bs { recibido - total_bs } else { rust_decimal::Decimal::ZERO };
+    venta.vuelto_bs = if recibido > total_neto_bs { recibido - total_neto_bs } else { rust_decimal::Decimal::ZERO };
     venta.fecha_cierre_unix = ahora_unix();
-    db.guardar_venta(venta).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let cerrada = db.guardar_venta(venta).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
 
-    // Actualizar contadores de la jornada activa
+    if abonos_usd > total_bruto_usd {
+        let excedente = abonos_usd - total_bruto_usd;
+        let saldo_venta = datiolabs_core::models::Venta {
+            id: uuid::Uuid::new_v4().to_string(),
+            etiqueta: format!("Saldo a favor de {}", cerrada.etiqueta),
+            es_cuenta_abierta: false,
+            estado: datiolabs_core::models::EstadoVenta::Cerrada,
+            lineas: datiolabs_core::models::LineasVenta::nuevas(),
+            tasa_del_dia: tasa,
+            total_usd: rust_decimal::Decimal::ZERO,
+            total_bs: rust_decimal::Decimal::ZERO,
+            monto_recibido_bs: rust_decimal::Decimal::ZERO,
+            vuelto_bs: rust_decimal::Decimal::ZERO,
+            pagos: vec![datiolabs_core::models::PagoVenta {
+                metodo: "SALDO.A_FAVOR".to_string(),
+                moneda: "USD".to_string(),
+                monto_usd: excedente,
+                monto_bs: excedente * tasa,
+                tasa_cambio: Some(tasa),
+                referencia: Some(cerrada.id.clone()),
+            }],
+            estado_vuelto: Some("SALDO_A_FAVOR".to_string()),
+            metodo_vuelto: None,
+            monto_vuelto_usd: Some(excedente),
+            tasa_vuelto: Some(tasa),
+            fecha_apertura_unix: ahora_unix(),
+            fecha_cierre_unix: ahora_unix(),
+            firma_sha256: String::new(),
+            tipo: "saldo_a_favor".to_string(),
+            cliente: cerrada.cliente.clone(),
+            nota: Some(format!("Saldo a favor de ${:.2} generado al cerrar {}", excedente, cerrada.id)),
+            abonos_usd: None,
+            abonos_bs: None,
+        };
+        let _ = db.guardar_venta(saldo_venta);
+    }
+
     if let Ok(Some(mut jornada)) = db.jornada_actual() {
-        jornada.ventas_total_usd += total_usd;
-        jornada.ventas_total_bs += total_bs;
+        jornada.ventas_total_usd += total_neto_usd;
+        jornada.ventas_total_bs += total_neto_bs;
         jornada.tickets_emitidos += 1;
         if es_deuda {
-            jornada.deudas_liquidadas_usd += total_usd;
+            jornada.deudas_liquidadas_usd += total_neto_usd;
         }
         let _ = db.guardar_jornada(&jornada);
     }
@@ -1709,11 +1748,19 @@ fn descontar_con_lotes_interno(
     cantidad: Decimal,
     venta_id: &str,
 ) -> Result<(), DbError> {
+    let mut unidades = cantidad;
+    if catalogo.es_caja(idx) {
+        if let Some(upc) = catalogo.unidades_por_caja(idx) {
+            if upc > 0 {
+                unidades = cantidad * Decimal::from(upc);
+            }
+        }
+    }
     let es_perecedero = catalogo.capacidades(idx) & capacidades::CAP_PERECEDERO != 0;
     if es_perecedero {
         let sku = catalogo.sku(idx).to_string();
         let mut libro = db.cargar_lotes()?;
-        let tocados = libro.descontar_fefo(&sku, cantidad, ahora_unix())?;
+        let tocados = libro.descontar_fefo(&sku, unidades, ahora_unix())?;
         for (lote_id, _) in tocados {
             if let Some((_, disp)) = libro.par_disponible_por_id(&lote_id) {
                 db.actualizar_disponible_lote(&lote_id, disp)?;
@@ -1722,7 +1769,7 @@ fn descontar_con_lotes_interno(
     }
     let mov = movimiento(
         catalogo.sku(idx),
-        -cantidad,
+        -unidades,
         MotivoMovimiento::Venta,
         Some(venta_id.to_string()),
     );
@@ -1779,7 +1826,24 @@ fn inicializar_negocio(
             licencia_titular: titular,
             licencia_estado: estado_lic,
             privacidad_inventario: privacidad_inventario.unwrap_or(false),
-        })
+        })?;
+        let defaults = [
+            ("PUNTOD.VENTA", "BS"),
+            ("BIOPAGO", "BS"),
+            ("PAGO MOVIL", "BS"),
+            ("TRANSF.BS.", "BS"),
+            ("BS.EFEC.", "BS"),
+            ("DOL.CASH", "USD"),
+            ("ZELLE", "USD"),
+            ("BINAN.USDT", "USD"),
+        ];
+        for (nombre, moneda) in defaults {
+            let _ = db.guardar_metodo_pago(&MetodoPagoConfig {
+                nombre: nombre.to_string(),
+                moneda: moneda.to_string(),
+            });
+        }
+        Ok::<(), DbError>(())
     })?;
     Ok(())
 }
@@ -2370,15 +2434,24 @@ fn cerrar_cuenta(
             .ok_or(DbError::Negocio(ErrorNegocio::CuentaInvalida(venta_id)))?;
 
         let cierre = licoreria::liquidar_cierre(&venta.lineas);
-        if recibido > Decimal::ZERO && recibido < cierre.total_bs {
+        let abonos_usd = venta.abonos_usd.unwrap_or(Decimal::ZERO);
+
+        let total_neto_usd = if abonos_usd > cierre.total_usd {
+            Decimal::ZERO
+        } else {
+            cierre.total_usd - abonos_usd
+        };
+        let total_neto_bs = total_neto_usd * cierre.tasa;
+
+        if recibido > Decimal::ZERO && recibido < total_neto_bs {
             return Err(DbError::Negocio(ErrorNegocio::PagoInsuficiente {
-                requerido: cierre.total_bs,
+                requerido: total_neto_bs,
                 recibido,
             }));
         }
 
         let vuelto = if recibido > Decimal::ZERO {
-            recibido - cierre.total_bs
+            recibido - total_neto_bs
         } else {
             Decimal::ZERO
         };
@@ -2414,8 +2487,8 @@ fn cerrar_cuenta(
         };
 
         venta.estado = EstadoVenta::Cerrada;
-        venta.total_usd = cierre.total_usd;
-        venta.total_bs = cierre.total_bs;
+        venta.total_usd = total_neto_usd;
+        venta.total_bs = total_neto_bs;
         venta.monto_recibido_bs = recibido;
         venta.vuelto_bs = vuelto;
         venta.pagos = pagos_model;
@@ -2426,13 +2499,50 @@ fn cerrar_cuenta(
         venta.fecha_cierre_unix = ahora_unix();
         let cerrada = db.guardar_venta(venta)?;
 
+        if abonos_usd > cierre.total_usd {
+            let excedente = abonos_usd - cierre.total_usd;
+            let saldo_venta = Venta {
+                id: Uuid::new_v4().to_string(),
+                etiqueta: format!("Saldo a favor de {}", cerrada.etiqueta),
+                es_cuenta_abierta: false,
+                estado: EstadoVenta::Cerrada,
+                lineas: LineasVenta::nuevas(),
+                tasa_del_dia: cierre.tasa,
+                total_usd: Decimal::ZERO,
+                total_bs: Decimal::ZERO,
+                monto_recibido_bs: Decimal::ZERO,
+                vuelto_bs: Decimal::ZERO,
+                pagos: vec![PagoVenta {
+                    metodo: "SALDO.A_FAVOR".to_string(),
+                    moneda: "USD".to_string(),
+                    monto_usd: excedente,
+                    monto_bs: excedente * cierre.tasa,
+                    tasa_cambio: Some(cierre.tasa),
+                    referencia: Some(cerrada.id.clone()),
+                }],
+                estado_vuelto: Some("SALDO_A_FAVOR".to_string()),
+                metodo_vuelto: None,
+                monto_vuelto_usd: Some(excedente),
+                tasa_vuelto: Some(cierre.tasa),
+                fecha_apertura_unix: ahora_unix(),
+                fecha_cierre_unix: ahora_unix(),
+                firma_sha256: String::new(),
+                tipo: "saldo_a_favor".to_string(),
+                cliente: cerrada.cliente.clone(),
+                nota: Some(format!("Saldo a favor de ${:.2} generado al cerrar {}", excedente, cerrada.id)),
+                abonos_usd: None,
+                abonos_bs: None,
+            };
+            let _ = db.guardar_venta(saldo_venta);
+        }
+
         // Actualizar contadores de la jornada activa
         if let Ok(Some(mut jornada)) = db.jornada_actual() {
-            jornada.ventas_total_usd += cierre.total_usd;
-            jornada.ventas_total_bs += cierre.total_bs;
+            jornada.ventas_total_usd += total_neto_usd;
+            jornada.ventas_total_bs += total_neto_bs;
             jornada.tickets_emitidos += 1;
             if cerrada.tipo == "deuda" {
-                jornada.deudas_liquidadas_usd += cierre.total_usd;
+                jornada.deudas_liquidadas_usd += total_neto_usd;
             }
             match cerrada.estado_vuelto.as_deref() {
                 Some("PAGADO") => { jornada.vuelto_pagado_bs += vuelto; }

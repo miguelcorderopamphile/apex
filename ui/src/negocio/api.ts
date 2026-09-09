@@ -995,8 +995,12 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
                 const prod = demoStore.productos.find((p) => p.sku === item.sku);
                 if (prod) {
                     const cant = Number(item.cantidad);
-                    totalUsd += Number(prod.precioUsd) * cant;
-                    prod.stock = String(Math.max(0, Number(prod.stock) - cant));
+                    let unidades = cant;
+                    if (prod.esCaja && prod.unidadesPorCaja && prod.unidadesPorCaja > 1) {
+                        unidades = cant * prod.unidadesPorCaja;
+                    }
+                    totalUsd += Number(prod.precioUsd) * unidades;
+                    prod.stock = String(Math.max(0, Number(prod.stock) - unidades));
                 }
             });
             const totalBs = totalUsd * tasa;
@@ -1106,13 +1110,16 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
             const cuenta = demoStore.cuentas.find((c) => c.ventaId === ventaId);
             const prod = demoStore.productos.find((p) => p.sku.trim().toUpperCase() === sku);
             if (cuenta && prod) {
-                // Descuento inmediato de stock físico si el producto controla inventario
+                let unidades = cant;
+                if (prod.esCaja && prod.unidadesPorCaja && prod.unidadesPorCaja > 1) {
+                    unidades = cant * prod.unidadesPorCaja;
+                }
                 if (!prod.sinStock) {
                     const st = parseNum(prod.stock);
-                    if (st < cant) {
+                    if (st < unidades) {
                         return Promise.reject(new Error(`Stock insuficiente para "${prod.nombre}". Disponible: ${st} ${prod.unidad || 'un.'}`));
                     }
-                    prod.stock = String(Math.max(0, st - cant));
+                    prod.stock = String(Math.max(0, st - unidades));
                 }
 
                 if (!Array.isArray(cuenta.consumos)) cuenta.consumos = [];

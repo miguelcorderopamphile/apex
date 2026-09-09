@@ -216,7 +216,46 @@ class AppController {
         }
     }
 
-    private async arrancarInventario(): Promise<void> {
+    private arrancarInventario(): void {
+        const cfg = this.modelo.getConfig();
+        if (!cfg?.tienePin || !cfg?.privacidadInventario) {
+            void this.abrirInventario();
+            return;
+        }
+        this.modalRoot.innerHTML = `
+        <div class="fixed inset-0 bg-black/40 flex items-center justify-center z-[100] p-4">
+            <div class="bg-white border-2 border-brand-black rounded-lg shadow-brutal p-8 w-full max-w-sm">
+                <h3 class="font-heading font-black text-2xl mb-1">ACCESO RESTRINGIDO</h3>
+                <p class="font-body text-brand-text mb-4">El inventario requiere la clave administrativa.</p>
+                <input id="pin-inv-input" type="password" inputmode="numeric" maxlength="16" autofocus
+                    class="w-full border-2 border-brand-black rounded px-4 py-3 text-2xl tracking-[0.5em] text-center mb-3" />
+                <p id="pin-inv-error" class="hidden text-red-700 font-bold mb-2">Clave incorrecta.</p>
+                <div class="grid grid-cols-2 gap-3">
+                    <button id="pin-inv-cancelar" class="bg-white border-2 border-brand-black font-heading font-black py-3 rounded">CANCELAR</button>
+                    <button id="pin-inv-ok" class="bg-brand-black text-white font-heading font-black py-3 rounded">ENTRAR</button>
+                </div>
+            </div>
+        </div>`;
+        const cerrar = (): void => { this.modalRoot.innerHTML = ''; };
+        document.getElementById('pin-inv-cancelar')?.addEventListener('click', cerrar);
+        const intentar = (): void =>
+            void (async () => {
+                const pin = (document.getElementById('pin-inv-input') as HTMLInputElement).value;
+                const ok = await api.validarPin(pin).catch(() => false);
+                if (ok) {
+                    cerrar();
+                    await this.abrirInventario();
+                } else {
+                    document.getElementById('pin-inv-error')?.classList.remove('hidden');
+                }
+            })();
+        document.getElementById('pin-inv-ok')?.addEventListener('click', intentar);
+        document.getElementById('pin-inv-input')?.addEventListener('keydown', (e) => {
+            if ((e as KeyboardEvent).key === 'Enter') intentar();
+        });
+    }
+
+    private async abrirInventario(): Promise<void> {
         this.marcarActivo('inventario');
         const vista = new InventarioView(this.root, this.modelo);
         try {
