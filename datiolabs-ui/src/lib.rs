@@ -190,28 +190,28 @@ struct AxumAppState {
 async fn api_auth_login(
     State(state): State<AxumAppState>,
     Json(payload): Json<LoginRequest>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, (StatusCode, String)> {
     let ledger = state
         .ledger
         .lock()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let cfg = match ledger.cargar_config() {
         Ok(Some(c)) => c,
-        _ => return Err(StatusCode::UNAUTHORIZED),
+        _ => return Err((StatusCode::UNAUTHORIZED, "Credenciales inválidas".to_string())),
     };
     drop(ledger);
 
     if cfg.pin_dueno_sha256.is_empty() {
-        return Err(StatusCode::UNAUTHORIZED);
+        return Err((StatusCode::UNAUTHORIZED, "Credenciales inválidas".to_string()));
     }
     if cfg.pin_dueno_sha256 != hash_pin(&payload.pin) {
-        return Err(StatusCode::UNAUTHORIZED);
+        return Err((StatusCode::UNAUTHORIZED, "Credenciales inválidas".to_string()));
     }
     let token = state
         .session_store
         .create()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let cookie = make_cookie_header(&token).ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let cookie = make_cookie_header(&token).ok_or((StatusCode::INTERNAL_SERVER_ERROR, "Error al crear cookie de sesión".to_string()))?;
     let mut resp = Json(LoginResponse {
         ok: true,
         message: hex_token(&token),
@@ -224,7 +224,7 @@ async fn api_auth_login(
 async fn api_auth_logout(
     State(state): State<AxumAppState>,
     headers: HeaderMap,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, (StatusCode, String)> {
     if let Some(token) = extract_session_token(&headers) {
         state.session_store.remove(&token);
     }
@@ -243,18 +243,18 @@ async fn serve_panel_html() -> Html<&'static str> {
     Html(include_str!("../panel.html"))
 }
 
-async fn api_panel(State(state): State<AxumAppState>) -> Result<Json<PanelDto>, StatusCode> {
+async fn api_panel(State(state): State<AxumAppState>) -> Result<Json<PanelDto>, (StatusCode, String)> {
     let ledger = state
         .ledger
         .lock()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let catalogo = ledger
         .cargar_catalogo()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let limite = ahora_unix() - 86_400;
     let ventas = ledger
         .ventas_recientes(2_000)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
 
     let mut usd = Decimal::ZERO;
     let mut bs = Decimal::ZERO;
@@ -322,39 +322,29 @@ async fn api_panel(State(state): State<AxumAppState>) -> Result<Json<PanelDto>, 
         }
     }
 
-    let mut top: [TopProductoDto; MAX_TOP] = [TopProductoDto {
-        nombre: Nombre::empty(),
-        cantidad: Decimal::ZERO,
-    }; MAX_TOP];
+    let mut top: Vec<TopProductoDto> = Vec::with_capacity(top_len);
     for i in 0..top_len {
-        top[i] = TopProductoDto {
+        top.push(TopProductoDto {
             nombre: top_nombre[i].clone(),
             cantidad: top_cant[i],
-        };
+        });
     }
 
-    // Fixed-size criticos (max 16 low-stock items)
-    const MAX_CRITICOS: usize = 16;
-    let mut criticos: [CriticoDto; MAX_CRITICOS] = [CriticoDto {
-        sku: Sku::empty(),
-        nombre: Nombre::empty(),
-        stock: Decimal::ZERO,
-    }; MAX_CRITICOS];
-    let mut criticos_len: usize = 0;
+    // Low-stock critical items (max 16)
+    let mut criticos: Vec<CriticoDto> = Vec::new();
     for i in 0..catalogo.len() {
-        if catalogo.stock(i) <= dec!(5) && criticos_len < MAX_CRITICOS {
-            criticos[criticos_len] = CriticoDto {
+        if catalogo.stock(i) <= dec!(5) && criticos.len() < MAX_PANEL_CRITICOS {
+            criticos.push(CriticoDto {
                 sku: catalogo.sku_obj(i),
                 nombre: catalogo.nombre_obj(i),
                 stock: catalogo.stock(i),
-            };
-            criticos_len += 1;
+            });
         }
     }
 
     let abiertas = ledger
         .cuentas_abiertas()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?
         .len();
 
     Ok(Json(PanelDto {
@@ -364,29 +354,27 @@ async fn api_panel(State(state): State<AxumAppState>) -> Result<Json<PanelDto>, 
         total_productos: catalogo.len(),
         valor_inventario_usd: catalogo.valor_inventario_usd(),
         criticos,
-        criticos_len,
         cuentas_abiertas: abiertas,
         top_productos: top,
-        top_productos_len: top_len,
     }))
 }
 
-async fn api_tasa(State(state): State<AxumAppState>) -> Result<Json<TasaInfo>, StatusCode> {
+async fn api_tasa(State(state): State<AxumAppState>) -> Result<Json<TasaInfo>, (StatusCode, String)> {
     Ok(Json(state.servicio_tasa.info_actual()))
 }
 
 async fn api_tasa_pendiente(
     State(state): State<AxumAppState>,
-) -> Result<Json<Option<TasaInfo>>, StatusCode> {
+) -> Result<Json<Option<TasaInfo>>, (StatusCode, String)> {
     Ok(Json(state.servicio_tasa.tasa_pendiente()))
 }
 
-async fn api_tasa_aplicar(State(state): State<AxumAppState>) -> Result<Json<TasaInfo>, StatusCode> {
+async fn api_tasa_aplicar(State(state): State<AxumAppState>) -> Result<Json<TasaInfo>, (StatusCode, String)> {
     state
         .servicio_tasa
         .aplicar_tasa_pendiente()
         .map(Json)
-        .map_err(|_| StatusCode::BAD_REQUEST)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Solicitud inválida: {e}")))
 }
 
 #[derive(Deserialize)]
@@ -397,14 +385,14 @@ struct ManualRateRequest {
 async fn api_tasa_manual(
     State(state): State<AxumAppState>,
     Json(payload): Json<ManualRateRequest>,
-) -> Result<Json<TasaInfo>, StatusCode> {
+) -> Result<Json<TasaInfo>, (StatusCode, String)> {
     let valor = Decimal::from_str(&payload.valor.trim().replace(',', "."))
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Solicitud inválida: {e}")))?;
     state
         .servicio_tasa
         .establecer_tasa_manual(valor)
         .map(Json)
-        .map_err(|_| StatusCode::BAD_REQUEST)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Solicitud inválida: {e}")))
 }
 
 async fn api_sse_events(
@@ -491,27 +479,27 @@ async fn handle_signaling_peer(
 
 async fn api_cuentas(
     State(state): State<AxumAppState>,
-) -> Result<Json<Vec<CuentaDto>>, StatusCode> {
+) -> Result<Json<Vec<CuentaDto>>, (StatusCode, String)> {
     let ledger = state
         .ledger
         .lock()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let cuentas = ledger
         .cuentas_abiertas()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     Ok(Json(cuentas.iter().map(cuenta_dto).collect()))
 }
 
 async fn api_productos(
     State(state): State<AxumAppState>,
-) -> Result<Json<Vec<ProductoDto>>, StatusCode> {
+) -> Result<Json<Vec<ProductoDto>>, (StatusCode, String)> {
     let ledger = state
         .ledger
         .lock()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let catalogo = ledger
         .cargar_catalogo()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let filas = (0..catalogo.len())
         .map(|i| ProductoDto {
             sku: catalogo.sku_obj(i),
@@ -539,12 +527,12 @@ use axum::extract::{Path, Query};
 async fn api_cuentas_abrir(
     State(state): State<AxumAppState>,
     Json(body): Json<HashMap<String, String>>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let etiqueta = body.get("etiqueta").cloned().unwrap_or_default();
     let tipo = body.get("tipo").cloned();
     let cliente = body.get("cliente").cloned();
     let nota = body.get("nota").cloned();
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let tasa = state.servicio_tasa.info_actual().valor;
     let venta = datiolabs_core::models::Venta {
         id: uuid::Uuid::new_v4().to_string(),
@@ -571,7 +559,7 @@ async fn api_cuentas_abrir(
         abonos_usd: Some(rust_decimal::Decimal::ZERO),
         abonos_bs: Some(rust_decimal::Decimal::ZERO),
     };
-    let guardada = db.guardar_venta(venta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let guardada = db.guardar_venta(venta).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ventaId": guardada.id })))
@@ -581,22 +569,22 @@ async fn api_cuentas_consumo(
     State(state): State<AxumAppState>,
     Path(id): Path<String>,
     Json(body): Json<HashMap<String, String>>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let sku = body.get("sku").cloned().unwrap_or_default();
     let cantidad = body.get("cantidad").cloned().unwrap_or_else(|| "1".to_string());
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let mut venta = db.cargar_venta(&id).ok().flatten()
         .filter(|v| v.es_cuenta_abierta && v.estado == datiolabs_core::models::EstadoVenta::Abierta)
-        .ok_or(StatusCode::NOT_FOUND)?;
-    let catalogo = db.cargar_catalogo().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let idx = catalogo.indice_de(&sku).ok_or(StatusCode::BAD_REQUEST)?;
-    let cant: rust_decimal::Decimal = cantidad.parse().map_err(|_| StatusCode::BAD_REQUEST)?;
+        .ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
+    let catalogo = db.cargar_catalogo().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let idx = catalogo.indice_de(&sku).ok_or((StatusCode::BAD_REQUEST, "SKU inválido".to_string()))?;
+    let cant: rust_decimal::Decimal = cantidad.parse().map_err(|e| (StatusCode::BAD_REQUEST, format!("Cantidad inválida: {e}")))?;
     let tasa = state.servicio_tasa.info_actual().valor;
     venta.lineas.agregar(
         catalogo.sku_obj(idx), catalogo.nombre_obj(idx),
         cant, catalogo.precio_usd(idx), tasa,
     );
-    db.guardar_venta(venta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.guardar_venta(venta).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -605,20 +593,20 @@ async fn api_cuentas_consumo(
 async fn api_cuentas_eliminar_consumo(
     State(state): State<AxumAppState>,
     Path((id, idx)): Path<(String, usize)>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let mut venta = db.cargar_venta(&id).ok().flatten()
         .filter(|v| v.es_cuenta_abierta && v.estado == datiolabs_core::models::EstadoVenta::Abierta)
-        .ok_or(StatusCode::NOT_FOUND)?;
+        .ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
     if idx >= venta.lineas.skus.len() {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err((StatusCode::BAD_REQUEST, "Solicitud inválida".to_string()));
     }
     venta.lineas.skus.remove(idx);
     venta.lineas.nombres.remove(idx);
     venta.lineas.cantidades.remove(idx);
     venta.lineas.precios_usd.remove(idx);
     venta.lineas.tasas_bloqueadas.remove(idx);
-    db.guardar_venta(venta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.guardar_venta(venta).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -628,18 +616,18 @@ async fn api_cuentas_abonar(
     State(state): State<AxumAppState>,
     Path(id): Path<String>,
     Json(body): Json<HashMap<String, serde_json::Value>>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let usd = body.get("montoUsd").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let bs = body.get("montoBs").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let mut venta = db.cargar_venta(&id).ok().flatten()
         .filter(|v| v.es_cuenta_abierta && v.estado == datiolabs_core::models::EstadoVenta::Abierta)
-        .ok_or(StatusCode::NOT_FOUND)?;
+        .ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
     let usd_d = rust_decimal::Decimal::try_from(usd).unwrap_or(rust_decimal::Decimal::ZERO);
     let bs_d = rust_decimal::Decimal::try_from(bs).unwrap_or(rust_decimal::Decimal::ZERO);
     venta.abonos_usd = Some(venta.abonos_usd.unwrap_or(rust_decimal::Decimal::ZERO) + usd_d);
     venta.abonos_bs = Some(venta.abonos_bs.unwrap_or(rust_decimal::Decimal::ZERO) + bs_d);
-    db.guardar_venta(venta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.guardar_venta(venta).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -649,19 +637,19 @@ async fn api_cuentas_cerrar(
     State(state): State<AxumAppState>,
     Path(id): Path<String>,
     Json(body): Json<HashMap<String, String>>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let recibido = body.get("montoRecibidoBs").and_then(|v| v.parse::<rust_decimal::Decimal>().ok()).unwrap_or(rust_decimal::Decimal::ZERO);
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let mut venta = db.cargar_venta(&id).ok().flatten()
         .filter(|v| v.es_cuenta_abierta && v.estado == datiolabs_core::models::EstadoVenta::Abierta)
-        .ok_or(StatusCode::NOT_FOUND)?;
+        .ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
     venta.estado = datiolabs_core::models::EstadoVenta::Cerrada;
     venta.total_usd = venta.lineas.total_usd();
     venta.total_bs = venta.lineas.total_bs();
     venta.monto_recibido_bs = recibido;
     venta.vuelto_bs = if recibido > venta.total_bs { recibido - venta.total_bs } else { rust_decimal::Decimal::ZERO };
     venta.fecha_cierre_unix = ahora_unix();
-    db.guardar_venta(venta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.guardar_venta(venta).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -705,10 +693,10 @@ async fn api_productos_crear(
 async fn api_productos_eliminar(
     State(state): State<AxumAppState>,
     Path(sku): Path<String>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let tree = db.inner_db().open_tree("productos").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    tree.remove(sku.as_bytes()).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let tree = db.inner_db().open_tree("productos").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    tree.remove(sku.as_bytes()).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -718,16 +706,16 @@ async fn api_productos_compra(
     State(state): State<AxumAppState>,
     Path(sku): Path<String>,
     Json(body): Json<HashMap<String, String>>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let cant = body.get("cantidad").and_then(|v| v.parse::<rust_decimal::Decimal>().ok()).unwrap_or(rust_decimal::Decimal::ZERO);
-    if cant <= rust_decimal::Decimal::ZERO { return Err(StatusCode::BAD_REQUEST); }
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if cant <= rust_decimal::Decimal::ZERO { return Err((StatusCode::BAD_REQUEST, "Solicitud inválida".to_string())); }
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let mov = datiolabs_core::models::MovimientoStock {
         id: uuid::Uuid::new_v4().to_string(), sku: sku.clone(),
         delta: cant, motivo: datiolabs_core::models::MotivoMovimiento::Compra,
         venta_id: None, fecha_unix: ahora_unix(), firma_sha256: String::new(),
     };
-    db.aplicar_movimiento(mov, |_, _| {}).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.aplicar_movimiento(mov, |_, _| {}).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -737,16 +725,16 @@ async fn api_productos_reducir(
     State(state): State<AxumAppState>,
     Path(sku): Path<String>,
     Json(body): Json<HashMap<String, String>>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let cant = body.get("cantidad").and_then(|v| v.parse::<rust_decimal::Decimal>().ok()).unwrap_or(rust_decimal::Decimal::ZERO);
-    if cant <= rust_decimal::Decimal::ZERO { return Err(StatusCode::BAD_REQUEST); }
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if cant <= rust_decimal::Decimal::ZERO { return Err((StatusCode::BAD_REQUEST, "Solicitud inválida".to_string())); }
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let mov = datiolabs_core::models::MovimientoStock {
         id: uuid::Uuid::new_v4().to_string(), sku: sku.clone(),
         delta: -cant, motivo: datiolabs_core::models::MotivoMovimiento::Ajuste,
         venta_id: None, fecha_unix: ahora_unix(), firma_sha256: String::new(),
     };
-    db.aplicar_movimiento(mov, |_, _| {}).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.aplicar_movimiento(mov, |_, _| {}).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -756,16 +744,16 @@ async fn api_productos_merma(
     State(state): State<AxumAppState>,
     Path(sku): Path<String>,
     Json(body): Json<HashMap<String, String>>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let cant = body.get("cantidad").and_then(|v| v.parse::<rust_decimal::Decimal>().ok()).unwrap_or(rust_decimal::Decimal::ZERO);
-    if cant <= rust_decimal::Decimal::ZERO { return Err(StatusCode::BAD_REQUEST); }
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if cant <= rust_decimal::Decimal::ZERO { return Err((StatusCode::BAD_REQUEST, "Solicitud inválida".to_string())); }
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let mov = datiolabs_core::models::MovimientoStock {
         id: uuid::Uuid::new_v4().to_string(), sku: sku.clone(),
         delta: -cant, motivo: datiolabs_core::models::MotivoMovimiento::Merma,
         venta_id: None, fecha_unix: ahora_unix(), firma_sha256: String::new(),
     };
-    db.aplicar_movimiento(mov, |_, _| {}).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.aplicar_movimiento(mov, |_, _| {}).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -773,9 +761,9 @@ async fn api_productos_merma(
 
 async fn api_ventas_listar(
     State(state): State<AxumAppState>,
-) -> Result<Json<Vec<serde_json::Value>>, StatusCode> {
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let ventas = db.ventas_recientes(200).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let ventas = db.ventas_recientes(200).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let result: Vec<serde_json::Value> = ventas.iter().map(|v| {
         serde_json::json!({
             "ventaId": v.id, "totalUsd": v.total_usd.to_string(),
@@ -788,12 +776,12 @@ async fn api_ventas_listar(
 async fn api_ventas_registrar(
     State(state): State<AxumAppState>,
     Json(body): Json<serde_json::Value>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let items = body.get("items").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-    if items.is_empty() { return Err(StatusCode::BAD_REQUEST); }
+    if items.is_empty() { return Err((StatusCode::BAD_REQUEST, "Solicitud inválida".to_string())); }
     let tasa = state.servicio_tasa.info_actual().valor;
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let catalogo = db.cargar_catalogo().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let catalogo = db.cargar_catalogo().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let mut lineas = datiolabs_core::models::LineasVenta::nuevas();
     for item in &items {
         let sku_str = item.get("sku").and_then(|v| v.as_str()).unwrap_or("");
@@ -815,137 +803,137 @@ async fn api_ventas_registrar(
         firma_sha256: String::new(), tipo: "venta".to_string(),
         cliente: None, nota: None, abonos_usd: None, abonos_bs: None,
     };
-    db.guardar_venta(venta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.guardar_venta(venta).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 // CRUD categorias
-async fn api_categorias_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::Categoria>>, StatusCode> {
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let cats = db.listar_categorias().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+async fn api_categorias_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::Categoria>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let cats = db.listar_categorias().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     Ok(Json(cats))
 }
-async fn api_categorias_crear(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<Vec<datiolabs_core::models::Categoria>>, StatusCode> {
+async fn api_categorias_crear(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<Vec<datiolabs_core::models::Categoria>>, (StatusCode, String)> {
     let nombre = body.get("nombre").cloned().unwrap_or_default();
     let cat = datiolabs_core::models::Categoria { id: format!("cat-{}", uuid::Uuid::new_v4().to_string()[..8].to_string()), nombre };
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    db.guardar_categoria(&cat).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let cats = db.listar_categorias().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    db.guardar_categoria(&cat).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let cats = db.listar_categorias().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db); let _ = state.tx.send(());
     Ok(Json(cats))
 }
-async fn api_categorias_eliminar(State(state): State<AxumAppState>, Path(id): Path<String>) -> Result<Json<Vec<datiolabs_core::models::Categoria>>, StatusCode> {
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    db.eliminar_categoria(&id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let cats = db.listar_categorias().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+async fn api_categorias_eliminar(State(state): State<AxumAppState>, Path(id): Path<String>) -> Result<Json<Vec<datiolabs_core::models::Categoria>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    db.eliminar_categoria(&id).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let cats = db.listar_categorias().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db); let _ = state.tx.send(());
     Ok(Json(cats))
 }
 
 // CRUD tasas impuestos
-async fn api_tasas_impuestos_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::TasaImpuesto>>, StatusCode> {
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(db.listar_tasas_impuestos().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?))
+async fn api_tasas_impuestos_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::TasaImpuesto>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    Ok(Json(db.listar_tasas_impuestos().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?))
 }
-async fn api_tasas_impuestos_crear(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, serde_json::Value>>) -> Result<Json<Vec<datiolabs_core::models::TasaImpuesto>>, StatusCode> {
+async fn api_tasas_impuestos_crear(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, serde_json::Value>>) -> Result<Json<Vec<datiolabs_core::models::TasaImpuesto>>, (StatusCode, String)> {
     let nombre = body.get("nombre").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let porcentaje = body.get("porcentaje").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let t = datiolabs_core::models::TasaImpuesto { id: format!("ti-{}", uuid::Uuid::new_v4().to_string()[..8].to_string()), nombre, porcentaje: rust_decimal::Decimal::try_from(porcentaje).unwrap_or(rust_decimal::Decimal::ZERO) };
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    db.guardar_tasa_impuesto(&t).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let result = db.listar_tasas_impuestos().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    db.guardar_tasa_impuesto(&t).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let result = db.listar_tasas_impuestos().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db); let _ = state.tx.send(());
     Ok(Json(result))
 }
-async fn api_tasas_impuestos_eliminar(State(state): State<AxumAppState>, Path(id): Path<String>) -> Result<Json<Vec<datiolabs_core::models::TasaImpuesto>>, StatusCode> {
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    db.eliminar_tasa_impuesto(&id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let result = db.listar_tasas_impuestos().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+async fn api_tasas_impuestos_eliminar(State(state): State<AxumAppState>, Path(id): Path<String>) -> Result<Json<Vec<datiolabs_core::models::TasaImpuesto>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    db.eliminar_tasa_impuesto(&id).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let result = db.listar_tasas_impuestos().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db); let _ = state.tx.send(());
     Ok(Json(result))
 }
 
 // CRUD metodos pago
-async fn api_metodos_pago_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::MetodoPagoConfig>>, StatusCode> {
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(db.listar_metodos_pago().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?))
+async fn api_metodos_pago_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::MetodoPagoConfig>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    Ok(Json(db.listar_metodos_pago().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?))
 }
-async fn api_metodos_pago_crear(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<Vec<datiolabs_core::models::MetodoPagoConfig>>, StatusCode> {
+async fn api_metodos_pago_crear(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<Vec<datiolabs_core::models::MetodoPagoConfig>>, (StatusCode, String)> {
     let nombre = body.get("nombre").cloned().unwrap_or_default().to_uppercase();
     let moneda = body.get("moneda").cloned().unwrap_or_else(|| "BS".to_string());
     let m = datiolabs_core::models::MetodoPagoConfig { nombre, moneda };
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    db.guardar_metodo_pago(&m).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let result = db.listar_metodos_pago().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    db.guardar_metodo_pago(&m).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let result = db.listar_metodos_pago().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db); let _ = state.tx.send(());
     Ok(Json(result))
 }
-async fn api_metodos_pago_eliminar(State(state): State<AxumAppState>, Path(nombre): Path<String>) -> Result<Json<Vec<datiolabs_core::models::MetodoPagoConfig>>, StatusCode> {
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    db.eliminar_metodo_pago(&nombre).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let result = db.listar_metodos_pago().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+async fn api_metodos_pago_eliminar(State(state): State<AxumAppState>, Path(nombre): Path<String>) -> Result<Json<Vec<datiolabs_core::models::MetodoPagoConfig>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    db.eliminar_metodo_pago(&nombre).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let result = db.listar_metodos_pago().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db); let _ = state.tx.send(());
     Ok(Json(result))
 }
 
 // CRUD operadores
-async fn api_operadores_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::Operador>>, StatusCode> {
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(db.listar_operadores().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?))
+async fn api_operadores_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::Operador>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    Ok(Json(db.listar_operadores().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?))
 }
-async fn api_operadores_crear(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<Vec<datiolabs_core::models::Operador>>, StatusCode> {
+async fn api_operadores_crear(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<Vec<datiolabs_core::models::Operador>>, (StatusCode, String)> {
     let nombre = body.get("nombre").cloned().unwrap_or_default();
     let op = datiolabs_core::models::Operador { id: format!("op-{}", uuid::Uuid::new_v4().to_string()[..8].to_string()), nombre, activo: true, creado_unix: ahora_unix() };
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    db.guardar_operador(&op).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let result = db.listar_operadores().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    db.guardar_operador(&op).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let result = db.listar_operadores().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db); let _ = state.tx.send(());
     Ok(Json(result))
 }
-async fn api_operadores_editar(State(state): State<AxumAppState>, Path(id): Path<String>, Json(body): Json<HashMap<String, String>>) -> Result<Json<Vec<datiolabs_core::models::Operador>>, StatusCode> {
+async fn api_operadores_editar(State(state): State<AxumAppState>, Path(id): Path<String>, Json(body): Json<HashMap<String, String>>) -> Result<Json<Vec<datiolabs_core::models::Operador>>, (StatusCode, String)> {
     let nombre = body.get("nombre").cloned().unwrap_or_default();
-    let mut ops = { let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?; db.listar_operadores().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? };
+    let mut ops = { let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?; db.listar_operadores().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))? };
     if let Some(op) = ops.iter_mut().find(|o| o.id == id) { op.nombre = nombre; }
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    for op in &ops { db.guardar_operador(op).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?; }
-    let result = db.listar_operadores().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    for op in &ops { db.guardar_operador(op).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?; }
+    let result = db.listar_operadores().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db); let _ = state.tx.send(());
     Ok(Json(result))
 }
-async fn api_operadores_eliminar(State(state): State<AxumAppState>, Path(id): Path<String>) -> Result<Json<Vec<datiolabs_core::models::Operador>>, StatusCode> {
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    db.eliminar_operador(&id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let result = db.listar_operadores().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+async fn api_operadores_eliminar(State(state): State<AxumAppState>, Path(id): Path<String>) -> Result<Json<Vec<datiolabs_core::models::Operador>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    db.eliminar_operador(&id).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let result = db.listar_operadores().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db); let _ = state.tx.send(());
     Ok(Json(result))
 }
-async fn api_operadores_alternar(State(state): State<AxumAppState>, Path(id): Path<String>) -> Result<Json<Vec<datiolabs_core::models::Operador>>, StatusCode> {
-    let mut ops = { let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?; db.listar_operadores().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? };
+async fn api_operadores_alternar(State(state): State<AxumAppState>, Path(id): Path<String>) -> Result<Json<Vec<datiolabs_core::models::Operador>>, (StatusCode, String)> {
+    let mut ops = { let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?; db.listar_operadores().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))? };
     if let Some(op) = ops.iter_mut().find(|o| o.id == id) { op.activo = !op.activo; }
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    for op in &ops { db.guardar_operador(op).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?; }
-    let result = db.listar_operadores().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    for op in &ops { db.guardar_operador(op).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?; }
+    let result = db.listar_operadores().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db); let _ = state.tx.send(());
     Ok(Json(result))
 }
 
 // Jornadas
-async fn api_jornada_actual(State(state): State<AxumAppState>) -> Result<Json<Option<datiolabs_core::models::Jornada>>, StatusCode> {
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(db.jornada_actual().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?))
+async fn api_jornada_actual(State(state): State<AxumAppState>) -> Result<Json<Option<datiolabs_core::models::Jornada>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    Ok(Json(db.jornada_actual().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?))
 }
-async fn api_jornadas_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::Jornada>>, StatusCode> {
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(db.listar_jornadas(50).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?))
+async fn api_jornadas_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::Jornada>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    Ok(Json(db.listar_jornadas(50).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?))
 }
-async fn api_jornadas_abrir(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, serde_json::Value>>) -> Result<Json<serde_json::Value>, StatusCode> {
+async fn api_jornadas_abrir(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, serde_json::Value>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let operador = body.get("operador").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let tasa = state.servicio_tasa.info_actual().valor;
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    if db.jornada_actual().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.is_some() {
-        return Err(StatusCode::CONFLICT);
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    if db.jornada_actual().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?.is_some() {
+        return Err((StatusCode::CONFLICT, "Conflicto: ya existe un recurso similar".to_string()));
     }
     let jornada = datiolabs_core::models::Jornada {
         id: format!("JOR-{}-01", chrono::Utc::now().format("%Y%m%d")),
@@ -958,128 +946,183 @@ async fn api_jornadas_abrir(State(state): State<AxumAppState>, Json(body): Json<
         vuelto_retenido_bs: rust_decimal::Decimal::ZERO, deudas_liquidadas_usd: rust_decimal::Decimal::ZERO,
         entradas_stock_reg: 0, mermas_stock_reg: 0, cambios_precio_reg: 0, checksum_sha256: None,
     };
-    db.guardar_jornada(&jornada).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.guardar_jornada(&jornada).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db); let _ = state.tx.send(());
     Ok(Json(serde_json::to_value(jornada).unwrap_or(serde_json::json!({}))))
 }
-async fn api_jornadas_cerrar(State(state): State<AxumAppState>) -> Result<Json<serde_json::Value>, StatusCode> {
+async fn api_jornadas_cerrar(State(state): State<AxumAppState>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let tasa = state.servicio_tasa.info_actual().valor;
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let mut jornada = db.jornada_actual().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::NOT_FOUND)?;
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let mut jornada = db.jornada_actual().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?
+        .ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
     jornada.estado = "cerrada".to_string();
     jornada.fin_unix = Some(ahora_unix());
     jornada.tasa_fin = Some(tasa);
     let checksum = format!("{:x}", sha2::Sha256::digest(jornada.id.as_bytes()));
     jornada.checksum_sha256 = Some(checksum);
-    db.guardar_jornada(&jornada).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.guardar_jornada(&jornada).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db); let _ = state.tx.send(());
     Ok(Json(serde_json::to_value(jornada).unwrap_or(serde_json::json!({}))))
 }
-async fn api_jornadas_asignar(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, serde_json::Value>>) -> Result<Json<serde_json::Value>, StatusCode> {
+async fn api_jornadas_asignar(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, serde_json::Value>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let ops: Vec<String> = body.get("operadores").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let mut jornada = db.jornada_actual().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.ok_or(StatusCode::NOT_FOUND)?;
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let mut jornada = db.jornada_actual().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?.ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
     jornada.operadores_activos = ops.clone();
     for op in &ops { if !jornada.operadores_relevo.contains(op) { jornada.operadores_relevo.push(op.clone()); } }
-    db.guardar_jornada(&jornada).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.guardar_jornada(&jornada).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db); let _ = state.tx.send(());
     Ok(Json(serde_json::to_value(jornada).unwrap_or(serde_json::json!({}))))
 }
-async fn api_jornadas_relevar(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<serde_json::Value>, StatusCode> {
+async fn api_jornadas_relevar(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let operador = body.get("operador").cloned().unwrap_or_default();
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let mut jornada = db.jornada_actual().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.ok_or(StatusCode::NOT_FOUND)?;
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let mut jornada = db.jornada_actual().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?.ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
     jornada.operador_actual = operador.clone();
     jornada.operadores_activos = vec![operador.clone()];
     if !jornada.operadores_relevo.contains(&operador) { jornada.operadores_relevo.push(operador); }
-    db.guardar_jornada(&jornada).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.guardar_jornada(&jornada).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db); let _ = state.tx.send(());
     Ok(Json(serde_json::to_value(jornada).unwrap_or(serde_json::json!({}))))
 }
 
 // Dispositivos
-async fn api_dispositivos_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::DispositivoRemoto>>, StatusCode> {
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(db.listar_dispositivos().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?))
+async fn api_dispositivos_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::DispositivoRemoto>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    Ok(Json(db.listar_dispositivos().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?))
 }
-async fn api_dispositivos_registrar(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<Vec<datiolabs_core::models::DispositivoRemoto>>, StatusCode> {
+async fn api_dispositivos_registrar(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<Vec<datiolabs_core::models::DispositivoRemoto>>, (StatusCode, String)> {
     let nombre = body.get("nombre").cloned().unwrap_or_default();
     let d = datiolabs_core::models::DispositivoRemoto { id: format!("dev-{}", uuid::Uuid::new_v4().to_string()[..8].to_string()), nombre, ip: String::new(), ultimo_acceso: String::new(), activo: true };
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    db.guardar_dispositivo(&d).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let result = db.listar_dispositivos().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    db.guardar_dispositivo(&d).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let result = db.listar_dispositivos().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db); let _ = state.tx.send(());
     Ok(Json(result))
 }
-async fn api_dispositivos_revocar(State(state): State<AxumAppState>, Path(id): Path<String>) -> Result<Json<Vec<datiolabs_core::models::DispositivoRemoto>>, StatusCode> {
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    db.eliminar_dispositivo(&id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let result = db.listar_dispositivos().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+async fn api_dispositivos_revocar(State(state): State<AxumAppState>, Path(id): Path<String>) -> Result<Json<Vec<datiolabs_core::models::DispositivoRemoto>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    db.eliminar_dispositivo(&id).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let result = db.listar_dispositivos().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db); let _ = state.tx.send(());
     Ok(Json(result))
 }
 
 // Semaforo
-async fn api_semaforo_obtener(State(state): State<AxumAppState>) -> Result<Json<serde_json::Value>, StatusCode> {
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let s = db.cargar_semaforo().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+async fn api_semaforo_obtener(State(state): State<AxumAppState>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let s = db.cargar_semaforo().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     Ok(Json(s.map(|v| serde_json::json!({ "rojoMax": v.rojo_max, "amarilloMax": v.amarillo_max })).unwrap_or(serde_json::json!({ "rojoMax": 5, "amarilloMax": 15 }))))
 }
-async fn api_semaforo_guardar(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, serde_json::Value>>) -> Result<Json<serde_json::Value>, StatusCode> {
+async fn api_semaforo_guardar(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, serde_json::Value>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let rojo = body.get("rojoMax").and_then(|v| v.as_u64()).unwrap_or(5) as u32;
     let amarillo = body.get("amarilloMax").and_then(|v| v.as_u64()).unwrap_or(15) as u32;
     let s = datiolabs_core::models::SemaforoStock { rojo_max: rojo, amarillo_max: amarillo };
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    db.guardar_semaforo(&s).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    db.guardar_semaforo(&s).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db); let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "rojoMax": rojo, "amarilloMax": amarillo })))
 }
 
 // PIN
-async fn api_pin_cambiar(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<serde_json::Value>, StatusCode> {
+async fn api_pin_cambiar(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let pin_anterior = body.get("pinAnterior").cloned().unwrap_or_default();
     let pin_nuevo = body.get("pinNuevo").cloned().unwrap_or_default();
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let mut cfg = db.cargar_config().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.ok_or(StatusCode::NOT_FOUND)?;
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let mut cfg = db.cargar_config().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?.ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
     if !cfg.pin_dueno_sha256.is_empty() {
         let hash = format!("{:x}", sha2::Sha256::digest(pin_anterior.as_bytes()));
-        if cfg.pin_dueno_sha256 != hash { return Err(StatusCode::FORBIDDEN); }
+        if cfg.pin_dueno_sha256 != hash { return Err((StatusCode::FORBIDDEN, "Acceso denegado".to_string())); }
     }
     cfg.pin_dueno_sha256 = if pin_nuevo.trim().is_empty() { String::new() } else { format!("{:x}", sha2::Sha256::digest(pin_nuevo.as_bytes())) };
-    db.actualizar_config(&cfg).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.actualizar_config(&cfg).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db); let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 // Privacidad de inventario
-async fn api_config_privacidad(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, bool>>) -> Result<Json<serde_json::Value>, StatusCode> {
+async fn api_config_privacidad(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, bool>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let valor = body.get("privacidadInventario").copied().unwrap_or(false);
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let mut cfg = db.cargar_config().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.ok_or(StatusCode::NOT_FOUND)?;
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let mut cfg = db.cargar_config().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?.ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
     cfg.privacidad_inventario = valor;
-    db.actualizar_config(&cfg).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.actualizar_config(&cfg).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db); let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 // Respaldos
-async fn api_respaldos_listar(State(_state): State<AxumAppState>) -> Result<Json<Vec<serde_json::Value>>, StatusCode> {
-    Ok(Json(Vec::<serde_json::Value>::new()))
+async fn api_respaldos_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<RespaldoInfo>>, (StatusCode, String)> {
+    let dir = get_backup_dir().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error directorio: {e}")))?;
+    let archivos = std::fs::read_dir(&dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error directorio: {e}")))?;
+    let mut infos = Vec::new();
+    for entrada in archivos.flatten() {
+        let ruta = entrada.path();
+        if ruta.extension().map(|e| e == "backup").unwrap_or(false) {
+            if let Ok(bytes) = std::fs::read(&ruta) {
+                let tamano_kb = (bytes.len() as u64) / 1024;
+                if bytes.len() > 44 {
+                    let meta: Result<datiolabs_core::db::BackupMetadata, _> = bincode::deserialize(&bytes[44..]);
+                    if let Ok(meta) = meta {
+                        let archivo_nombre = ruta.file_name().unwrap_or_default().to_string_lossy().to_string();
+                        let id = archivo_nombre.replace(".backup", "");
+                        let fecha = chrono::DateTime::from_timestamp(meta.timestamp_unix, 0)
+                            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                            .unwrap_or_default();
+                        infos.push(RespaldoInfo {
+                            id,
+                            fecha,
+                            archivo_nombre,
+                            registros: meta.total_registros,
+                            tamano_kb,
+                            checksum_sha256: meta.checksum_sha256,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    Ok(Json(infos))
 }
-async fn api_respaldos_crear(State(state): State<AxumAppState>) -> Result<Json<serde_json::Value>, StatusCode> {
-    let _ = state.tx.send(());
-    Ok(Json(serde_json::json!({ "ok": true })))
+async fn api_respaldos_crear(state: State<AxumAppState>) -> Result<Json<RespaldoInfo>, (StatusCode, String)> {
+    let dir = get_backup_dir().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error directorio: {e}")))?;
+    std::fs::create_dir_all(&dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error directorio: {e}")))?;
+    let ruta = std::path::Path::new(&dir).join(format!("datio_{}.backup", ahora_unix()));
+    let ruta_str = ruta.to_string_lossy().to_string();
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let meta = db.exportar_backup(&ruta_str).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error al crear respaldo: {e}")))?;
+    let archivo_nombre = ruta.file_name().unwrap_or_default().to_string_lossy().to_string();
+    let id = archivo_nombre.replace(".backup", "");
+    let fecha = chrono::DateTime::from_timestamp(meta.timestamp_unix, 0)
+        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_default();
+    let tamano_kb = std::fs::metadata(&ruta).map(|m| m.len() / 1024).unwrap_or(0);
+    Ok(Json(RespaldoInfo {
+        id,
+        fecha,
+        archivo_nombre,
+        registros: meta.total_registros,
+        tamano_kb,
+        checksum_sha256: meta.checksum_sha256,
+    }))
 }
-async fn api_respaldos_restaurar(State(state): State<AxumAppState>, Json(_body): Json<HashMap<String, String>>) -> Result<Json<serde_json::Value>, StatusCode> {
-    let _ = state.tx.send(());
+async fn api_respaldos_restaurar(state: State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let archivo = body.get("archivo").cloned().unwrap_or_default();
+    let dir = get_backup_dir().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error directorio: {e}")))?;
+    let ruta = if archivo.is_empty() {
+        std::path::Path::new(&dir).join(format!("datio_{}.backup", ahora_unix())).to_string_lossy().to_string()
+    } else {
+        std::path::Path::new(&dir).join(&archivo).to_string_lossy().to_string()
+    };
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    db.importar_backup(&ruta).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error al restaurar: {e}")))?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 // Historico tasas
-async fn api_historico_tasas(State(state): State<AxumAppState>) -> Result<Json<Vec<serde_json::Value>>, StatusCode> {
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let tasas = db.ultimas_tasas(50).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+async fn api_historico_tasas(State(state): State<AxumAppState>) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let tasas = db.ultimas_tasas(50).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let result: Vec<serde_json::Value> = tasas.iter().enumerate().map(|(i, t)| {
         serde_json::json!({ "id": format!("tasa-{}", i), "valor": t.valor_bs_por_usd.to_string(), "tipo": "automatico" })
     }).collect();
@@ -1330,11 +1373,9 @@ struct PanelDto {
     tickets_24h: usize,
     total_productos: usize,
     valor_inventario_usd: Decimal,
-    criticos: [CriticoDto; MAX_PANEL_CRITICOS],
-    criticos_len: usize,
+    criticos: Vec<CriticoDto>,
     cuentas_abiertas: usize,
-    top_productos: [TopProductoDto; MAX_PANEL_TOP],
-    top_productos_len: usize,
+    top_productos: Vec<TopProductoDto>,
 }
 
 fn decimal_de(texto: &str) -> Result<Decimal, UIError> {
@@ -2170,32 +2211,22 @@ fn datos_panel(estado: tauri::State<AppState>) -> Result<PanelDto, UIError> {
             }
         }
 
-        let mut top: [TopProductoDto; MAX_TOP] = [TopProductoDto {
-            nombre: Nombre::empty(),
-            cantidad: Decimal::ZERO,
-        }; MAX_TOP];
+        let mut top: Vec<TopProductoDto> = Vec::with_capacity(top_len);
         for i in 0..top_len {
-            top[i] = TopProductoDto {
+            top.push(TopProductoDto {
                 nombre: top_nombre[i].clone(),
                 cantidad: top_cant[i],
-            };
+            });
         }
 
-        const MAX_CRITICOS: usize = 16;
-        let mut criticos: [CriticoDto; MAX_CRITICOS] = [CriticoDto {
-            sku: Sku::empty(),
-            nombre: Nombre::empty(),
-            stock: Decimal::ZERO,
-        }; MAX_CRITICOS];
-        let mut criticos_len: usize = 0;
+        let mut criticos: Vec<CriticoDto> = Vec::new();
         for i in 0..catalogo.len() {
-            if catalogo.stock(i) <= dec!(5) && criticos_len < MAX_CRITICOS {
-                criticos[criticos_len] = CriticoDto {
+            if catalogo.stock(i) <= dec!(5) && criticos.len() < 16 {
+                criticos.push(CriticoDto {
                     sku: catalogo.sku_obj(i),
                     nombre: catalogo.nombre_obj(i),
                     stock: catalogo.stock(i),
-                };
-                criticos_len += 1;
+                });
             }
         }
 
@@ -2208,10 +2239,8 @@ fn datos_panel(estado: tauri::State<AppState>) -> Result<PanelDto, UIError> {
             valor_inventario_usd: catalogo.valor_inventario_usd(),
             total_productos: catalogo.len(),
             criticos,
-            criticos_len,
             cuentas_abiertas: abiertas,
             top_productos: top,
-            top_productos_len: top_len,
         })
     })
 }
@@ -2441,16 +2470,20 @@ fn importar_backup(
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct BackupInfo {
-    ruta: String,
-    metadata: BackupMetadataDto,
+struct RespaldoInfo {
+    id: String,
+    fecha: String,
+    archivo_nombre: String,
+    registros: usize,
+    tamano_kb: u64,
+    checksum_sha256: String,
 }
 
 #[tauri::command]
 fn listar_backups(
     state: tauri::State<AppState>,
     directorio: String,
-) -> Result<Vec<BackupInfo>, UIError> {
+) -> Result<Vec<RespaldoInfo>, UIError> {
     let db = state
         .ledger
         .lock()
@@ -2460,15 +2493,19 @@ fn listar_backups(
     for meta in metas {
         let ruta =
             std::path::Path::new(&directorio).join(format!("datio_{}.backup", meta.timestamp_unix));
-        infos.push(BackupInfo {
-            ruta: ruta.to_string_lossy().to_string(),
-            metadata: BackupMetadataDto {
-                version: meta.version,
-                timestamp_unix: meta.timestamp_unix,
-                arboles: meta.arboles,
-                total_registros: meta.total_registros,
-                checksum_sha256: meta.checksum_sha256,
-            },
+        let archivo_nombre = ruta.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let id = archivo_nombre.replace(".backup", "");
+        let fecha = chrono::DateTime::from_timestamp(meta.timestamp_unix, 0)
+            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+            .unwrap_or_default();
+        let tamano_kb = std::fs::metadata(&ruta).map(|m| m.len() / 1024).unwrap_or(0);
+        infos.push(RespaldoInfo {
+            id,
+            fecha,
+            archivo_nombre,
+            registros: meta.total_registros,
+            tamano_kb,
+            checksum_sha256: meta.checksum_sha256,
         });
     }
     Ok(infos)
@@ -3046,37 +3083,54 @@ fn listar_historico_tasas(estado: tauri::State<AppState>) -> Result<Vec<Registro
 // ---------------- comandos: respaldos (aliases) ----------------
 
 #[tauri::command]
-fn crear_respaldo(estado: tauri::State<AppState>) -> Result<BackupMetadataDto, UIError> {
+fn crear_respaldo(estado: tauri::State<AppState>) -> Result<RespaldoInfo, UIError> {
     let dir = get_backup_dir()?;
     std::fs::create_dir_all(&dir).map_err(|e| UIError::new("error directorio", &e.to_string()))?;
     let ruta = std::path::Path::new(&dir).join(format!("datio_{}.backup", ahora_unix()));
     let ruta_str = ruta.to_string_lossy().to_string();
     let payload = BackupRuta { ruta: ruta_str };
-    exportar_backup(estado, payload)
+    let meta = exportar_backup(estado, payload)?;
+    let archivo_nombre = ruta.file_name().unwrap_or_default().to_string_lossy().to_string();
+    let id = archivo_nombre.replace(".backup", "");
+    let fecha = chrono::DateTime::from_timestamp(meta.timestamp_unix, 0)
+        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_default();
+    let tamano_kb = std::fs::metadata(&ruta).map(|m| m.len() / 1024).unwrap_or(0);
+    Ok(RespaldoInfo {
+        id,
+        fecha,
+        archivo_nombre,
+        registros: meta.total_registros,
+        tamano_kb,
+        checksum_sha256: meta.checksum_sha256,
+    })
 }
 
 #[tauri::command]
-fn listar_respaldos(estado: tauri::State<AppState>) -> Result<Vec<BackupInfo>, UIError> {
+fn listar_respaldos(estado: tauri::State<AppState>) -> Result<Vec<RespaldoInfo>, UIError> {
     let dir = get_backup_dir()?;
-    let directorio = dir.clone();
     let archivos = std::fs::read_dir(&dir).map_err(|e| UIError::new("error directorio", &e.to_string()))?;
     let mut infos = Vec::new();
     for entrada in archivos.flatten() {
         let ruta = entrada.path();
         if ruta.extension().map(|e| e == "backup").unwrap_or(false) {
             if let Ok(bytes) = std::fs::read(&ruta) {
+                let tamano_kb = (bytes.len() as u64) / 1024;
                 if bytes.len() > 44 {
                     let meta: Result<BackupMetadata, _> = bincode::deserialize(&bytes[44..]);
                     if let Ok(meta) = meta {
-                        infos.push(BackupInfo {
-                            ruta: ruta.to_string_lossy().to_string(),
-                            metadata: BackupMetadataDto {
-                                version: meta.version,
-                                timestamp_unix: meta.timestamp_unix,
-                                arboles: meta.arboles,
-                                total_registros: meta.total_registros,
-                                checksum_sha256: meta.checksum_sha256,
-                            },
+                        let archivo_nombre = ruta.file_name().unwrap_or_default().to_string_lossy().to_string();
+                        let id = archivo_nombre.replace(".backup", "");
+                        let fecha = chrono::DateTime::from_timestamp(meta.timestamp_unix, 0)
+                            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                            .unwrap_or_default();
+                        infos.push(RespaldoInfo {
+                            id,
+                            fecha,
+                            archivo_nombre,
+                            registros: meta.total_registros,
+                            tamano_kb,
+                            checksum_sha256: meta.checksum_sha256,
                         });
                     }
                 }
