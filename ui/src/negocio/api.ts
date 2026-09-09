@@ -76,6 +76,14 @@ export interface RespaldoInfo {
     checksumSha256: string;
 }
 
+export interface BackupMetadata {
+    version: number;
+    timestampUnix: number;
+    arboles: string[];
+    totalRegistros: number;
+    checksumSha256: string;
+}
+
 export interface LicenciaInfo {
     estado: 'activa' | 'vencida' | 'demo';
     tipo: 'Enterprise Standalone Local' | 'Demo Cloud';
@@ -1321,6 +1329,12 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
             const montoBsAporte = Number(args?.montoBs || 0);
             const cuenta = demoStore.cuentas.find((c) => c.ventaId === ventaId);
             if (cuenta && Number.isFinite(montoUsd) && montoUsd > 0 && montoUsd <= 50000) {
+                // Reject payments on accounts with no products — prevents floating data
+                const tieneProductos = Array.isArray(cuenta.consumos) && cuenta.consumos.length > 0;
+                const tieneTotal = parseNum(cuenta.totalParcialUsd) > 0;
+                if (!tieneProductos && !tieneTotal) {
+                    return Promise.resolve(null as unknown as T);
+                }
                 const tasa = Number(demoStore.tasaActual.valor);
                 const prevAbonoUsd = Number(cuenta.abonosUsd || '0');
                 const prevAbonoBs = Number(cuenta.abonosBs || '0');
@@ -1935,4 +1949,7 @@ export const api = {
     obtenerSemaforoStock: () => invocar<ConfigSemaforoStock>('obtener_semaforo_stock'),
     guardarSemaforoStock: (rojoMax: number, amarilloMax: number) =>
         invocar<ConfigSemaforoStock>('guardar_semaforo_stock', { rojoMax, amarilloMax }),
+    autoBackup: (directorio: string, maxBackups: number) =>
+        invocar<BackupMetadata | null>('auto_backup', { directorio, maxBackups }),
+    getBackupDir: () => invocar<string>('get_backup_dir'),
 };

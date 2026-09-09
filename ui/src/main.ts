@@ -71,6 +71,10 @@ class AppController {
         }
         this.pintarBotonesRol(cfg);
         document.getElementById('btn-conectar-movil')?.addEventListener('click', () => this.abrirModalQrMovil());
+
+        // Auto-backup on startup (non-blocking)
+        this.ejecutarBackupAutomatico();
+
         await this.arrancarCaja();
     }
 
@@ -90,6 +94,15 @@ class AppController {
             if (tasa) this.modelo.setTasa(Number(tasa.valor));
         } catch (_) {
             /* la caja conserva la ultima tasa conocida */
+        }
+    }
+
+    private async ejecutarBackupAutomatico(): Promise<void> {
+        try {
+            const dir = await api.getBackupDir();
+            if (dir) await api.autoBackup(dir, 5);
+        } catch (_) {
+            /* backup automatico no bloquea el arranque */
         }
     }
 
@@ -501,14 +514,23 @@ class AppController {
         this.actualizarEstadoP2P('connecting', 'Oferta P2P enviada, esperando respuesta...');
 
         if (this.offerResendTimer) clearInterval(this.offerResendTimer);
+        let offerAttempts = 0;
+        const MAX_OFFER_ATTEMPTS = 30;
         this.offerResendTimer = setInterval(() => {
+            offerAttempts++;
+            if (offerAttempts >= MAX_OFFER_ATTEMPTS) {
+                clearInterval(this.offerResendTimer!);
+                this.offerResendTimer = null;
+                this.actualizarEstadoP2P('error', 'Tiempo de espera agotado. Verifique que el dispositivo movil este en la misma red.');
+                return;
+            }
             if (this.peerConnection && this.wsSignaling && this.wsSignaling.readyState === WebSocket.OPEN) {
                 this.wsSignaling.send(JSON.stringify({
                     type: 'offer',
                     sdp: this.peerConnection.localDescription,
                 }));
             }
-        }, 2000);
+        }, 3000);
     }
 
     private async handleDataChannelMessage(data: string): Promise<void> {

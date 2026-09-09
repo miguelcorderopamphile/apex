@@ -295,8 +295,10 @@ impl Catalogo {
     }
 
     /// Zero-copy in-place stock mutation over the contiguous column.
+    /// Stock is clamped to zero minimum — never goes negative.
     pub fn aplicar_delta_stock(&mut self, idx: usize, delta: Decimal) {
-        self.stocks[idx] += delta;
+        let nuevo = self.stocks[idx] + delta;
+        self.stocks[idx] = if nuevo < Decimal::ZERO { Decimal::ZERO } else { nuevo };
     }
 
     /// Column scan valuation of the whole inventory in USD.

@@ -458,14 +458,14 @@ export class PanelDuenoView {
 
             <div class="bg-white border-2 border-brand-black rounded-lg shadow-brutal p-4 sm:p-6 flex flex-col justify-between">
                 <div>
-                    <h3 class="font-heading font-black text-lg sm:text-xl border-b-2 border-brand-black pb-3 mb-4">Indicadores de Rendimiento Gerencial</h3>
+                    <h3 class="font-heading font-black text-lg sm:text-xl border-b-2 border-brand-black pb-3 mb-4">Indicadores de Rendimiento</h3>
                     <div class="space-y-3">
                         <div class="flex justify-between items-center py-1.5 border-b border-gray-200">
                             <span class="font-bold text-xs text-gray-600 uppercase">Tickets Emitidos</span>
                             <span id="kpi-tickets" class="font-black font-heading text-base sm:text-lg">${datos.tickets24h}</span>
                         </div>
                         <div class="flex justify-between items-center py-1.5 border-b border-gray-200">
-                            <span class="font-bold text-xs text-gray-600 uppercase">Ticket Promedio Ponderado</span>
+                            <span class="font-bold text-xs text-gray-600 uppercase">Ticket Promedio</span>
                             <span id="kpi-ticket-prom" class="font-black font-heading text-base">$ ${datos.tickets24h > 0 ? (Number(datos.ventas24hUsd) / datos.tickets24h).toFixed(2) : '0.00'}</span>
                         </div>
                         <div class="flex justify-between items-center py-1.5 border-b border-gray-200">

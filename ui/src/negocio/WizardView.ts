@@ -311,8 +311,8 @@ export class WizardView {
         }
 
         try {
-            const privInvRadio = document.getElementById('priv-inv-abierto') as HTMLInputElement | null;
-            const privacidadInventario = privInvRadio?.checked ?? false;
+            const privInvRadio = document.getElementById('priv-inv-dueno') as HTMLInputElement | null;
+            const privacidadInventario = privInvRadio?.checked ?? true;
             await this.modelo.inicializar(nombre, rubros, pin, licenciaClave, privacidadInventario);
             const cfg = this.modelo.getConfig();
             if (cfg) this.alTerminar(cfg);

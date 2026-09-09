@@ -184,7 +184,7 @@ struct AxumAppState {
     servicio_tasa: Arc<ServicioTasa>,
     session_store: SessionStore,
     tx: broadcast::Sender<()>,
-    signaling: Arc<Mutex<HashMap<String, Vec<mpsc::UnboundedSender<String>>>>>,
+    signaling: Arc<Mutex<HashMap<String, Vec<(String, mpsc::UnboundedSender<String>)>>>>,
 }
 
 async fn api_auth_login(
@@ -513,15 +513,17 @@ async fn handle_signaling_peer(
 ) {
     let (mut ws_tx, mut ws_rx) = socket.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    let peer_id = Uuid::new_v4().to_string();
 
     {
         if let Ok(mut rooms) = state.signaling.lock() {
-            rooms.entry(room.clone()).or_insert_with(Vec::new).push(tx);
+            rooms.entry(room.clone()).or_insert_with(Vec::new).push((peer_id.clone(), tx));
         }
     }
 
     let room_for_remove = room.clone();
     let state_clone = state.clone();
+    let peer_id_for_recv = peer_id.clone();
 
     let send_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
@@ -538,8 +540,10 @@ async fn handle_signaling_peer(
                     let rooms = state_clone.signaling.lock().unwrap_or_else(|e| e.into_inner());
                     rooms.get(&room).cloned().unwrap_or_default()
                 };
-                for peer_tx in &peers {
-                    let _ = peer_tx.send(text.to_string());
+                for (pid, peer_tx) in &peers {
+                    if pid != &peer_id_for_recv {
+                        let _ = peer_tx.send(text.to_string());
+                    }
                 }
             }
         }
@@ -553,7 +557,7 @@ async fn handle_signaling_peer(
     {
         if let Ok(mut rooms) = state.signaling.lock() {
             if let Some(peers) = rooms.get_mut(&room_for_remove) {
-                peers.retain(|p| !p.is_closed());
+                peers.retain(|(pid, p)| pid != &peer_id && !p.is_closed());
                 if peers.is_empty() {
                     rooms.remove(&room_for_remove);
                 }
@@ -3532,6 +3536,14 @@ fn abonar_cuenta(
             .cargar_venta(&venta_id)?
             .filter(|v| v.es_cuenta_abierta && v.estado == EstadoVenta::Abierta)
             .ok_or(DbError::Negocio(ErrorNegocio::CuentaInvalida(venta_id)))?;
+
+        // Reject payments on accounts with no products — prevents floating data
+        if venta.lineas.skus.is_empty() && venta.total_usd <= Decimal::ZERO {
+            return Err(DbError::Negocio(ErrorNegocio::CuentaInvalida(
+                "No se puede abonar a una cuenta sin productos registrados".into(),
+            )));
+        }
+
         venta.abonos_usd = Some(venta.abonos_usd.unwrap_or(Decimal::ZERO) + usd);
         venta.abonos_bs = Some(venta.abonos_bs.unwrap_or(Decimal::ZERO) + bs);
         db.guardar_venta(venta)

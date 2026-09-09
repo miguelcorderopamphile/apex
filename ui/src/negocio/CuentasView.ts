@@ -857,11 +857,11 @@ export class CuentasView {
                         <div class="bg-purple-50 border border-brand-purple rounded p-2 text-xs font-bold space-y-0.5">
                             <div class="flex justify-between">
                                 <span class="text-gray-600">Valor aportado en Bolívares:</span>
-                                <span class="text-brand-purple font-mono font-black">Bs. ${fmt(aporteBs)}</span>
+                                <span data-aporte-bs class="text-brand-purple font-mono font-black">Bs. ${fmt(aporteBs)}</span>
                             </div>
                             <div class="flex justify-between">
                                 <span class="text-gray-600">Abono computable (Tasa BCV):</span>
-                                <span class="text-brand-black font-mono font-black">$ ${fmt(abonoComputableUsd)} USD</span>
+                                <span data-abono-computable class="text-brand-black font-mono font-black">$ ${fmt(abonoComputableUsd)} USD</span>
                             </div>
                         </div>
                         `
@@ -884,7 +884,7 @@ export class CuentasView {
                                 class="w-full border-2 border-brand-black rounded px-3 py-1.5 text-xs font-mono focus:outline-none" />
                         </div>
 
-                        ${previewHtml}
+                        <div id="abono-preview-container">${previewHtml}</div>
                     </div>
 
                     <div class="grid grid-cols-2 gap-3">
@@ -895,6 +895,84 @@ export class CuentasView {
             </div>`;
 
             conectarEventosAbono();
+        };
+
+        const updatePreviewAbono = () => {
+            const esUsd = metodoSeleccionado.moneda === 'USD';
+            const tasaAplicada = esUsd ? (tasaMetodo > 0 ? tasaMetodo : tasaOficial) : tasaOficial;
+            const aporteBs = esUsd ? montoInput * tasaAplicada : montoInput;
+            const abonoComputableUsd = tasaOficial > 0 ? aporteBs / tasaOficial : 0;
+            const totalAbonadoProyectado = abonosU + abonoComputableUsd;
+            const diffUsd = totalAbonadoProyectado - totalU;
+            const diffBs = diffUsd * tasaOficial;
+
+            let previewHtml = '';
+            if (montoInput <= 0.0001) {
+                previewHtml = `
+                    <div class="rounded p-2.5 border-2 border-brand-black bg-gray-50 text-xs text-gray-700 font-bold">
+                        <div class="flex justify-between items-center">
+                            <span>Aporte de este abono:</span>
+                            <span class="font-heading font-black text-sm text-gray-800">$0.00 USD (Bs. 0.00)</span>
+                        </div>
+                        <div class="flex justify-between items-center text-gray-600 border-t border-gray-300 pt-1 mt-1">
+                            <span>Saldo pendiente actual:</span>
+                            <span class="font-heading font-black text-sm text-brand-black">$${fmt(pendienteUsd)} USD (Bs. ${fmt(pendienteBs)})</span>
+                        </div>
+                    </div>
+                `;
+            } else if (diffUsd > 0.001) {
+                previewHtml = `
+                    <div class="rounded p-2.5 border-2 border-emerald-600 bg-emerald-50 text-xs text-emerald-950 font-bold">
+                        <div class="flex justify-between items-center mb-1">
+                            <span>Nuevo Total Abonado:</span>
+                            <span class="font-heading font-black text-sm text-emerald-700">$${fmt(totalAbonadoProyectado)}</span>
+                        </div>
+                        <div class="flex justify-between items-center text-emerald-900 border-t border-emerald-300 pt-1">
+                            <span>Saldo a favor resultante:</span>
+                            <span class="font-heading font-black text-base text-emerald-600">+$${fmt(diffUsd)} USD (Bs. ${fmt(diffBs)})</span>
+                        </div>
+                        <p class="text-[10px] text-emerald-800 mt-1">✓ Abono superior al consumo: este excedente se convertirá en ganancia o crédito al liquidar.</p>
+                    </div>
+                `;
+            } else if (diffUsd < -0.001) {
+                const restante = Math.abs(diffUsd);
+                const restanteBs = restante * tasaOficial;
+                previewHtml = `
+                    <div class="rounded p-2.5 border-2 border-brand-black bg-gray-50 text-xs text-gray-800 font-bold">
+                        <div class="flex justify-between items-center mb-1">
+                            <span>Nuevo Total Abonado:</span>
+                            <span class="font-heading font-black text-sm text-brand-black">$${fmt(totalAbonadoProyectado)}</span>
+                        </div>
+                        <div class="flex justify-between items-center text-gray-900 border-t border-gray-300 pt-1">
+                            <span>Saldo pendiente restante:</span>
+                            <span class="font-heading font-black text-base text-brand-black">$${fmt(restante)} USD (Bs. ${fmt(restanteBs)})</span>
+                        </div>
+                    </div>
+                `;
+            } else {
+                previewHtml = `
+                    <div class="rounded p-2.5 border-2 border-green-600 bg-green-50 text-xs text-green-950 font-bold">
+                        <div class="flex justify-between items-center">
+                            <span>Registro saldado exactamente:</span>
+                            <span class="font-heading font-black text-base text-green-700">$${fmt(totalAbonadoProyectado)} USD</span>
+                        </div>
+                    </div>
+                `;
+            }
+
+            const previewEl = this.modal.querySelector('#abono-preview-container');
+            if (previewEl) previewEl.innerHTML = previewHtml;
+
+            const okBtn = this.modal.querySelector<HTMLButtonElement>('#modal-abono-ok');
+            if (okBtn) okBtn.disabled = montoInput <= 0;
+
+            // Update computed values for USD method
+            if (esUsd) {
+                const aporteBsEl = this.modal.querySelector('[data-aporte-bs]');
+                if (aporteBsEl) aporteBsEl.textContent = `Bs. ${fmt(aporteBs)}`;
+                const computableEl = this.modal.querySelector('[data-abono-computable]');
+                if (computableEl) computableEl.textContent = `$ ${fmt(abonoComputableUsd)} USD`;
+            }
         };
 
         const conectarEventosAbono = () => {
@@ -921,16 +999,13 @@ export class CuentasView {
             // Input monto
             this.modal.querySelector<HTMLInputElement>("#input-monto-abono")?.addEventListener("input", (e) => {
                 montoInput = parseNum((e.target as HTMLInputElement).value);
-                renderFormularioAbono();
-                const inp = this.modal.querySelector<HTMLInputElement>("#input-monto-abono");
-                inp?.focus();
+                updatePreviewAbono();
             });
 
             // Input tasa
             this.modal.querySelector<HTMLInputElement>("#input-tasa-abono")?.addEventListener("input", (e) => {
                 tasaMetodo = parseNum((e.target as HTMLInputElement).value);
-                renderFormularioAbono();
-                const inp = this.modal.querySelector<HTMLInputElement>("#input-tasa-abono");
+                updatePreviewAbono();
                 inp?.focus();
             });
 

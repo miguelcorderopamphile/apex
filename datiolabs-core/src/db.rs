@@ -389,7 +389,8 @@ impl Database {
         match tree.get(movimiento.sku.as_bytes())? {
             Some(bytes) => {
                 let mut producto: Producto = bincode::deserialize(&bytes)?;
-                producto.stock += movimiento.delta;
+                let nuevo = producto.stock + movimiento.delta;
+                producto.stock = if nuevo < Decimal::ZERO { Decimal::ZERO } else { nuevo };
                 tree.insert(movimiento.sku.as_bytes(), bincode::serialize(&producto)?)?;
             }
             None => return Err(DbError::Negocio(ErrorNegocio::ProductoInexistente)),
