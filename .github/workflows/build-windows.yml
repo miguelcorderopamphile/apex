@@ -24,7 +24,7 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: './ -> target'
+          workspaces: './datiolabs-ui -> target'
 
       - name: Install Tauri CLI
         uses: cargo-bins/cargo-binstall@main
