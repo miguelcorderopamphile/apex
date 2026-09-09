@@ -14,9 +14,9 @@ use thiserror::Error;
 
 #[derive(Serialize, Deserialize)]
 pub struct BackupHeader {
-    version: u32,
-    timestamp_unix: i64,
-    arboles_count: u32,
+    pub version: u32,
+    pub timestamp_unix: i64,
+    pub arboles_count: u32,
 }
 
 const ARBOL_TASAS: &str = "tasas_bcv";

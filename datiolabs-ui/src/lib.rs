@@ -4,7 +4,7 @@ mod tasa_bcv;
 use datiolabs_core::capacidades::{
     self, ErrorNegocio, capacidades_de_rubros, rubros_activos, validar_linea,
 };
-use datiolabs_core::db::{BackupMetadata, Database as Ledger, DbError};
+use datiolabs_core::db::{Database as Ledger, DbError};
 use datiolabs_core::models::{
     Catalogo, Categoria, ConfigNegocio, DispositivoRemoto, EstadoVenta, Jornada, LineasVenta,
     MetodoPagoConfig, MotivoMovimiento, MovimientoStock, Nombre, Operador, PagoVenta, Producto,
@@ -607,7 +607,7 @@ async fn api_productos(
 
 // ---------------- Axum handlers: escritura ----------------
 
-use axum::extract::{Path, Query};
+use axum::extract::Path;
 
 async fn api_cuentas_abrir(
     State(state): State<AxumAppState>,
@@ -625,7 +625,7 @@ async fn api_cuentas_abrir(
         es_cuenta_abierta: true,
         estado: datiolabs_core::models::EstadoVenta::Abierta,
         lineas: datiolabs_core::models::LineasVenta::nuevas(),
-        tasa_del_dia: rust_decimal::Decimal::ZERO,
+        tasa_del_dia: tasa,
         total_usd: rust_decimal::Decimal::ZERO,
         total_bs: rust_decimal::Decimal::ZERO,
         monto_recibido_bs: rust_decimal::Decimal::ZERO,
@@ -2426,6 +2426,7 @@ fn cerrar_cuenta(
 ) -> Result<TicketDto, UIError> {
     let _cfg = config_requerida(&estado)?;
     let recibido = decimal_de(&monto_recibido_bs)?;
+    let tasa = estado.servicio_tasa.info_actual().valor;
 
     let cerrada = con_ledger(&estado, |db| {
         let mut venta = db
@@ -2441,7 +2442,7 @@ fn cerrar_cuenta(
         } else {
             cierre.total_usd - abonos_usd
         };
-        let total_neto_bs = total_neto_usd * cierre.tasa;
+        let total_neto_bs = total_neto_usd * tasa;
 
         if recibido > Decimal::ZERO && recibido < total_neto_bs {
             return Err(DbError::Negocio(ErrorNegocio::PagoInsuficiente {
@@ -2507,7 +2508,7 @@ fn cerrar_cuenta(
                 es_cuenta_abierta: false,
                 estado: EstadoVenta::Cerrada,
                 lineas: LineasVenta::nuevas(),
-                tasa_del_dia: cierre.tasa,
+                tasa_del_dia: tasa,
                 total_usd: Decimal::ZERO,
                 total_bs: Decimal::ZERO,
                 monto_recibido_bs: Decimal::ZERO,
@@ -2516,14 +2517,14 @@ fn cerrar_cuenta(
                     metodo: "SALDO.A_FAVOR".to_string(),
                     moneda: "USD".to_string(),
                     monto_usd: excedente,
-                    monto_bs: excedente * cierre.tasa,
-                    tasa_cambio: Some(cierre.tasa),
+                    monto_bs: excedente * tasa,
+                    tasa_cambio: Some(tasa),
                     referencia: Some(cerrada.id.clone()),
                 }],
                 estado_vuelto: Some("SALDO_A_FAVOR".to_string()),
                 metodo_vuelto: None,
                 monto_vuelto_usd: Some(excedente),
-                tasa_vuelto: Some(cierre.tasa),
+                tasa_vuelto: Some(tasa),
                 fecha_apertura_unix: ahora_unix(),
                 fecha_cierre_unix: ahora_unix(),
                 firma_sha256: String::new(),
@@ -3623,7 +3624,7 @@ fn crear_respaldo(estado: tauri::State<AppState>) -> Result<RespaldoInfo, UIErro
 #[tauri::command]
 fn listar_respaldos(estado: tauri::State<AppState>) -> Result<Vec<RespaldoInfo>, UIError> {
     let dir = get_backup_dir()?;
-    let ledger = estado.db.lock().map_err(|e| UIError::new("lock", &e.to_string()))?;
+    let ledger = estado.ledger.lock().map_err(|e| UIError::new("lock", &e.to_string()))?;
     let metas = ledger.listar_backups(&dir).map_err(|e| UIError::new("error listando respaldos", &e.to_string()))?;
     let mut infos = Vec::new();
     for meta in metas {
