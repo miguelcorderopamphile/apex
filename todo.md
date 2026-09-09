@@ -38,9 +38,10 @@
   - Timeout después de ~90 segundos sin conexión.
   - No es verdadero P2P (WebRTC), es dependiente del servidor HTTP en el desktop.
 - **Fix Necesita arquitectura completa:**
-  - Usar signaling server externo (Cloudflare Workers) en vez de WebSocket local.
+  - Mover signaling server a Cloudflare Workers (externo, no local en el desktop).
+  - STUN/TURN ya están configurados (Cloudflare, Google, OpenRelay) pero no se usan porque el signaling es local.
   - Implementar autenticación P2P con PIN.
-  - El mobile debe poder conectarse desde fuera de la LAN.
+  - Una vez establecido el DataChannel, la comunicación es directa peer-to-peer vía STUN/TURN.
 
 ## 8. Respaldos no se generan
 - **Archivo:** main.ts (ejecutarBackupAutomatico) + api.ts
