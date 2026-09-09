@@ -1367,12 +1367,6 @@ async fn api_respaldos_listar(State(state): State<AxumAppState>) -> Result<Json<
     infos.sort_by(|a, b| b.fecha.cmp(&a.fecha));
     Ok(Json(infos))
 }
-                }
-            }
-        }
-    }
-    Ok(Json(infos))
-}
 async fn api_respaldos_crear(state: State<AxumAppState>) -> Result<Json<RespaldoInfo>, (StatusCode, String)> {
     let dir = get_backup_dir().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error directorio: {e}")))?;
     std::fs::create_dir_all(&dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error directorio: {e}")))?;
