@@ -353,7 +353,7 @@ export class InventarioView {
                     ${this.tasasImpuestos.map((t) => `
                         <div class="flex justify-between items-center border border-brand-black rounded p-2.5 bg-gray-50">
                             <span class="font-bold text-sm">${t.nombre} (${t.porcentaje}%)</span>
-                            ${t.porcentaje === 0 || t.porcentaje === 16 ? '<span class="text-xs text-gray-400 font-bold">Por defecto</span>' : `<button data-del-tax="${t.id}" class="text-xs font-black text-red-600 hover:underline">Eliminar</button>`}
+                            ${t.porcentaje === '0' || t.porcentaje === '16' ? '<span class="text-xs text-gray-400 font-bold">Por defecto</span>' : `<button data-del-tax="${t.id}" class="text-xs font-black text-red-600 hover:underline">Eliminar</button>`}
                         </div>
                     `).join('')}
                 </div>

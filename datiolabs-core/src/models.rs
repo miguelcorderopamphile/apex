@@ -185,6 +185,13 @@ pub struct Catalogo {
     impuestos_pct: Vec<Decimal>,
     stocks: Vec<Decimal>,
     capacidades: Vec<u16>,
+    categorias_id: Vec<Option<String>>,
+    precios_bruto_usd: Vec<Option<Decimal>>,
+    margenes_pct: Vec<Option<Decimal>>,
+    sin_stocks: Vec<bool>,
+    unidades: Vec<Option<String>>,
+    es_cajas: Vec<bool>,
+    unidades_por_cajas: Vec<Option<u32>>,
 }
 
 impl Catalogo {
@@ -213,6 +220,13 @@ impl Catalogo {
         self.impuestos_pct.push(p.impuesto_pct);
         self.stocks.push(p.stock);
         self.capacidades.push(p.capacidades);
+        self.categorias_id.push(p.categoria_id);
+        self.precios_bruto_usd.push(p.precio_bruto_usd);
+        self.margenes_pct.push(p.margen_pct);
+        self.sin_stocks.push(p.sin_stock);
+        self.unidades.push(p.unidad);
+        self.es_cajas.push(p.es_caja);
+        self.unidades_por_cajas.push(p.unidades_por_caja);
         Ok(idx)
     }
 
@@ -252,6 +266,34 @@ impl Catalogo {
         self.capacidades[idx]
     }
 
+    pub fn categoria_id(&self, idx: usize) -> Option<String> {
+        self.categorias_id[idx].clone()
+    }
+
+    pub fn precio_bruto_usd(&self, idx: usize) -> Option<Decimal> {
+        self.precios_bruto_usd[idx]
+    }
+
+    pub fn margen_pct(&self, idx: usize) -> Option<Decimal> {
+        self.margenes_pct[idx]
+    }
+
+    pub fn sin_stock(&self, idx: usize) -> bool {
+        self.sin_stocks[idx]
+    }
+
+    pub fn unidad(&self, idx: usize) -> Option<String> {
+        self.unidades[idx].clone()
+    }
+
+    pub fn es_caja(&self, idx: usize) -> bool {
+        self.es_cajas[idx]
+    }
+
+    pub fn unidades_por_caja(&self, idx: usize) -> Option<u32> {
+        self.unidades_por_cajas[idx]
+    }
+
     /// Zero-copy in-place stock mutation over the contiguous column.
     pub fn aplicar_delta_stock(&mut self, idx: usize, delta: Decimal) {
         self.stocks[idx] += delta;
@@ -273,13 +315,13 @@ impl Catalogo {
             impuesto_pct: self.impuestos_pct[idx],
             stock: self.stocks[idx],
             capacidades: self.capacidades[idx],
-            categoria_id: None,
-            precio_bruto_usd: None,
-            margen_pct: None,
-            sin_stock: false,
-            unidad: None,
-            es_caja: false,
-            unidades_por_caja: None,
+            categoria_id: self.categorias_id[idx].clone(),
+            precio_bruto_usd: self.precios_bruto_usd[idx],
+            margen_pct: self.margenes_pct[idx],
+            sin_stock: self.sin_stocks[idx],
+            unidad: self.unidades[idx].clone(),
+            es_caja: self.es_cajas[idx],
+            unidades_por_caja: self.unidades_por_cajas[idx],
         }
     }
 
@@ -464,6 +506,7 @@ pub struct MetodoPagoConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct Operador {
     pub id: String,
     pub nombre: String,
@@ -472,6 +515,7 @@ pub struct Operador {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct Jornada {
     pub id: String,
     pub estado: String,
@@ -504,6 +548,7 @@ pub struct Jornada {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct DispositivoRemoto {
     pub id: String,
     pub nombre: String,

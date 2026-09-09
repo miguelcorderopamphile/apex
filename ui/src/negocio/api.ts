@@ -51,7 +51,7 @@ export interface ConfigInfo {
 export interface TasaImpuesto {
     id: string;
     nombre: string;
-    porcentaje: number;
+    porcentaje: string;
 }
 
 export interface Categoria {
@@ -190,7 +190,7 @@ export interface Ticket {
     vueltoBs: string;
     tasaDelDia: string;
     fechaHora?: string;
-    canal?: 'VENTA DIRECTA' | 'CONSUMO EN CUENTA' | 'LIQUIDACIÓN DE DEUDA';
+    canal?: 'VENTA DIRECTA' | 'CONSUMO EN CUENTA' | 'LIQUIDACION DE DEUDA';
     operador?: string;
     saldoAFavorConsolidadoUsd?: string;
     fechaUnix?: number;
@@ -491,9 +491,9 @@ class MockDemoStorage {
         { id: 'cat-panes', nombre: 'Panes y Horneados' },
     ];
     tasasImpuestos: TasaImpuesto[] = [
-        { id: 'iva-16', nombre: 'IVA General (16%)', porcentaje: 16 },
-        { id: 'iva-8', nombre: 'IVA Reducido (8%)', porcentaje: 8 },
-        { id: 'iva-0', nombre: 'Exento (0%)', porcentaje: 0 },
+        { id: 'iva-16', nombre: 'IVA General (16%)', porcentaje: '16' },
+        { id: 'iva-8', nombre: 'IVA Reducido (8%)', porcentaje: '8' },
+        { id: 'iva-0', nombre: 'Exento (0%)', porcentaje: '0' },
     ];
     tasaActual: TasaActual = { valor: '807.39', fechaUnix: Math.floor(Date.now() / 1000), fluctuacionPct: null, direccion: null };
     tickets: Ticket[] = [
@@ -1245,7 +1245,7 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
                 vueltoBs: vueltoBs.toFixed(2),
                 fechaHora: `Hoy, ${horaStr}`,
                 fechaUnix: Math.floor(ahora.getTime() / 1000),
-                canal: esDeuda ? 'LIQUIDACIÓN DE DEUDA' : 'CONSUMO EN CUENTA',
+                canal: esDeuda ? 'LIQUIDACION DE DEUDA' : 'CONSUMO EN CUENTA',
                 operador: opActual,
                 saldoAFavorConsolidadoUsd: saldoAFavorConsolidadoUsd > 0 ? saldoAFavorConsolidadoUsd.toFixed(2) : undefined,
                 pagos: pagosRecibidos,
@@ -1297,7 +1297,7 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
             const nombre = String(args?.nombre || '').trim();
             const porcentaje = Number(args?.porcentaje || 0);
             const id = 'tax-' + Math.random().toString(36).slice(2, 7);
-            demoStore.tasasImpuestos.push({ id, nombre, porcentaje });
+            demoStore.tasasImpuestos.push({ id, nombre, porcentaje: String(porcentaje) });
             demoStore.persist();
             return Promise.resolve(demoStore.tasasImpuestos as unknown as T);
         }

@@ -442,8 +442,9 @@ async fn handle_signaling_peer(
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
 
     {
-        let mut rooms = state.signaling.lock().unwrap();
-        rooms.entry(room.clone()).or_insert_with(Vec::new).push(tx);
+        if let Ok(mut rooms) = state.signaling.lock() {
+            rooms.entry(room.clone()).or_insert_with(Vec::new).push(tx);
+        }
     }
 
     let room_for_remove = room.clone();
@@ -461,7 +462,7 @@ async fn handle_signaling_peer(
         while let Some(Ok(msg)) = ws_rx.next().await {
             if let WsMessage::Text(text) = msg {
                 let peers = {
-                    let rooms = state_clone.signaling.lock().unwrap();
+                    let rooms = state_clone.signaling.lock().unwrap_or_else(|e| e.into_inner());
                     rooms.get(&room).cloned().unwrap_or_default()
                 };
                 for peer_tx in &peers {
@@ -477,11 +478,12 @@ async fn handle_signaling_peer(
     }
 
     {
-        let mut rooms = state.signaling.lock().unwrap();
-        if let Some(peers) = rooms.get_mut(&room_for_remove) {
-            peers.retain(|p| !p.is_closed());
-            if peers.is_empty() {
-                rooms.remove(&room_for_remove);
+        if let Ok(mut rooms) = state.signaling.lock() {
+            if let Some(peers) = rooms.get_mut(&room_for_remove) {
+                peers.retain(|p| !p.is_closed());
+                if peers.is_empty() {
+                    rooms.remove(&room_for_remove);
+                }
             }
         }
     }
@@ -518,13 +520,13 @@ async fn api_productos(
             impuesto_pct: catalogo.impuesto_pct(i),
             stock: catalogo.stock(i),
             capacidades: catalogo.capacidades(i),
-            categoria_id: None,
-            precio_bruto_usd: None,
-            margen_pct: None,
-            sin_stock: false,
-            unidad: None,
-            es_caja: false,
-            unidades_por_caja: None,
+            categoria_id: catalogo.categoria_id(i),
+            precio_bruto_usd: catalogo.precio_bruto_usd(i),
+            margen_pct: catalogo.margen_pct(i),
+            sin_stock: catalogo.sin_stock(i),
+            unidad: catalogo.unidad(i),
+            es_caja: catalogo.es_caja(i),
+            unidades_por_caja: catalogo.unidades_por_caja(i),
         })
         .collect();
     Ok(Json(filas))
@@ -668,24 +670,33 @@ async fn api_cuentas_cerrar(
 async fn api_productos_crear(
     State(state): State<AxumAppState>,
     Json(body): Json<HashMap<String, serde_json::Value>>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let sku = body.get("sku").and_then(|v| v.as_str()).unwrap_or("");
     let nombre = body.get("nombre").and_then(|v| v.as_str()).unwrap_or("");
     let precio = body.get("precioUsd").and_then(|v| v.as_str()).and_then(|s| s.parse::<rust_decimal::Decimal>().ok()).unwrap_or(rust_decimal::Decimal::ZERO);
     let impuesto = body.get("impuestoPct").and_then(|v| v.as_str()).and_then(|s| s.parse::<rust_decimal::Decimal>().ok()).unwrap_or(rust_decimal::Decimal::ZERO);
     let stock = body.get("stockInicial").and_then(|v| v.as_str()).and_then(|s| s.parse::<rust_decimal::Decimal>().ok()).unwrap_or(rust_decimal::Decimal::ZERO);
     let caps = body.get("capacidades").and_then(|v| v.as_u64()).unwrap_or(1) as u16;
+    if sku.is_empty() || nombre.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "SKU y nombre son requeridos".to_string()));
+    }
+    if precio <= rust_decimal::Decimal::ZERO {
+        return Err((StatusCode::BAD_REQUEST, "El precio debe ser mayor a cero".to_string()));
+    }
     let p = datiolabs_core::models::Producto {
-        sku: datiolabs_core::models::Sku::new(sku).map_err(|_| StatusCode::BAD_REQUEST)?,
-        nombre: datiolabs_core::models::Nombre::new(nombre).map_err(|_| StatusCode::BAD_REQUEST)?,
+        sku: datiolabs_core::models::Sku::new(sku).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?,
+        nombre: datiolabs_core::models::Nombre::new(nombre).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?,
         precio_usd: precio, impuesto_pct: impuesto, stock, capacidades: caps,
         categoria_id: body.get("categoriaId").and_then(|v| v.as_str()).map(String::from),
-        precio_bruto_usd: None, margen_pct: None, sin_stock: false,
+        precio_bruto_usd: body.get("precioBrutoUsd").and_then(|v| v.as_str()).and_then(|s| s.parse::<rust_decimal::Decimal>().ok()),
+        margen_pct: body.get("margenPct").and_then(|v| v.as_str()).and_then(|s| s.parse::<rust_decimal::Decimal>().ok()),
+        sin_stock: body.get("sinStock").and_then(|v| v.as_bool()).unwrap_or(false),
         unidad: body.get("unidad").and_then(|v| v.as_str()).map(String::from),
-        es_caja: false, unidades_por_caja: None,
+        es_caja: body.get("esCaja").and_then(|v| v.as_bool()).unwrap_or(false),
+        unidades_por_caja: body.get("unidadesPorCaja").and_then(|v| v.as_u64()).map(|n| n as u32),
     };
-    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    db.guardar_producto(&p).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let db = state.ledger.lock().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "DB bloqueada".to_string()))?;
+    db.guardar_producto(&p).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -1252,6 +1263,23 @@ struct TicketDto {
     monto_vuelto_usd: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tasa_vuelto: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fecha_hora: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    canal: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    operador: Option<String>,
+    fecha_unix: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConsumoCuentaDto {
+    sku: String,
+    nombre: String,
+    cantidad: Decimal,
+    precio_usd: Decimal,
+    subtotal_usd: Decimal,
 }
 
 #[derive(Serialize)]
@@ -1272,6 +1300,8 @@ struct CuentaDto {
     cliente: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     nota: Option<String>,
+    consumos: Vec<ConsumoCuentaDto>,
+    fecha_apertura_unix: i64,
 }
 
 #[derive(Clone, Copy, Serialize)]
@@ -1830,6 +1860,17 @@ fn armar_ticket(venta: &Venta, recibido: Decimal, vuelto: Decimal) -> TicketDto 
         },
         monto_vuelto_usd: venta.monto_vuelto_usd.map(|m| m.to_string()),
         tasa_vuelto: venta.tasa_vuelto.map(|t| t.to_string()),
+        fecha_hora: chrono::DateTime::from_timestamp(venta.fecha_cierre_unix, 0)
+            .map(|dt| dt.format("%d/%m/%Y %H:%M").to_string()),
+        canal: Some(if venta.es_cuenta_abierta {
+            "CONSUMO EN CUENTA".to_string()
+        } else if venta.tipo == "deuda" {
+            "LIQUIDACION DE DEUDA".to_string()
+        } else {
+            "VENTA DIRECTA".to_string()
+        }),
+        operador: None,
+        fecha_unix: venta.fecha_cierre_unix,
         lineas: (0..venta.lineas.skus.len())
             .map(|i| {
                 let sub_usd = venta.lineas.cantidades[i] * venta.lineas.precios_usd[i];
@@ -1901,6 +1942,15 @@ fn abrir_cuenta(
 }
 
 fn cuenta_dto(v: &Venta) -> CuentaDto {
+    let consumos: Vec<ConsumoCuentaDto> = (0..v.lineas.skus.len())
+        .map(|i| ConsumoCuentaDto {
+            sku: v.lineas.skus[i].as_str().to_string(),
+            nombre: v.lineas.nombres[i].as_str().to_string(),
+            cantidad: v.lineas.cantidades[i],
+            precio_usd: v.lineas.precios_usd[i],
+            subtotal_usd: v.lineas.cantidades[i] * v.lineas.precios_usd[i],
+        })
+        .collect();
     CuentaDto {
         venta_id: v.id.clone(),
         etiqueta: v.etiqueta.clone(),
@@ -1912,6 +1962,8 @@ fn cuenta_dto(v: &Venta) -> CuentaDto {
         tipo: Some(v.tipo.clone()),
         cliente: v.cliente.clone(),
         nota: v.nota.clone(),
+        consumos,
+        fecha_apertura_unix: v.fecha_apertura_unix,
     }
 }
 

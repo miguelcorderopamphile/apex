@@ -393,34 +393,34 @@
         }
 
         function renderPanel(p) {
-            document.getElementById('v-usd').textContent = fmtUsd(p.ventas_24h_usd);
-            document.getElementById('v-bsf').textContent = fmtBs(p.ventas_24h_bs);
-            document.getElementById('v-tickets').textContent = Number(p.tickets_24h).toLocaleString();
-            document.getElementById('inv-valor').textContent = fmtUsd(p.valor_inventario_usd);
-            document.getElementById('inv-criticos').textContent = p.criticos_len;
-            document.getElementById('inv-total').textContent = p.total_productos;
+            document.getElementById('v-usd').textContent = fmtUsd(p.ventas24hUsd);
+            document.getElementById('v-bsf').textContent = fmtBs(p.ventas24hBs);
+            document.getElementById('v-tickets').textContent = Number(p.tickets24h).toLocaleString();
+            document.getElementById('inv-valor').textContent = fmtUsd(p.valorInventarioUsd);
+            document.getElementById('inv-criticos').textContent = p.criticosLen;
+            document.getElementById('inv-total').textContent = p.totalProductos;
             const cl = document.getElementById('criticos-list');
-            if(!p.criticos_len){cl.innerHTML='<div style="text-align:center;color:var(--muted);padding:12px;">Sin criticos</div>';}
-            else{let h='';for(let i=0;i<p.criticos_len;i++){const c=p.criticos[i];h+=`<div class="row"><div><strong>${c.nombre}</strong><br><span style="font-size:11px;color:var(--muted);">${c.sku}</span></div><span class="badge badge-red">${c.stock}</span></div>`;}cl.innerHTML=h;}
-            renderTopChart(p.top_productos,p.top_productos_len);
+            if(!p.criticosLen){cl.innerHTML='<div style="text-align:center;color:var(--muted);padding:12px;">Sin criticos</div>';}
+            else{let h='';for(let i=0;i<p.criticosLen;i++){const c=p.criticos[i];h+=`<div class="row"><div><strong>${c.nombre}</strong><br><span style="font-size:11px;color:var(--muted);">${c.sku}</span></div><span class="badge badge-red">${c.stock}</span></div>`;}cl.innerHTML=h;}
+            renderTopChart(p.topProductos,p.topProductosLen);
         }
         function renderTasa(t,pend) {
             if(t&&t.valor>0){document.getElementById('tasa-valor').textContent=Number(t.valor).toFixed(2);document.getElementById('tasa-fuente').textContent=t.fuente||'BCV';
-            const fl=document.getElementById('tasa-fluct');if(t.fluctuacion_pct!=null){const pct=Number(t.fluctuacion_pct).toFixed(2);fl.className=t.direccion==='subio'?'green':t.direccion==='bajo'?'red':'';fl.textContent=(t.direccion==='subio'?'\u25B2 ':t.direccion==='bajo'?'\u25BC ':'')+pct+'%';}else{fl.textContent='Sin dato anterior';fl.className='';}}
+            const fl=document.getElementById('tasa-fluct');if(t.fluctuacionPct!=null){const pct=Number(t.fluctuacionPct).toFixed(2);fl.className=t.direccion==='subio'?'green':t.direccion==='bajo'?'red':'';fl.textContent=(t.direccion==='subio'?'\u25B2 ':t.direccion==='bajo'?'\u25BC ':'')+pct+'%';}else{fl.textContent='Sin dato anterior';fl.className='';}}
             else{document.getElementById('tasa-valor').textContent='\u2014';document.getElementById('tasa-fluct').textContent='Sin tasa';}
             const pd=document.getElementById('tasa-pendiente');if(pend&&pend.valor>0){pd.classList.remove('hidden');document.getElementById('pend-val').textContent=Number(pend.valor).toFixed(2)+' Bs/USD';}else pd.classList.add('hidden');
         }
         function renderCuentas(c) {
             const cl=document.getElementById('cuentas-list');
             if(!c.length){cl.innerHTML='<div style="text-align:center;color:var(--muted);padding:12px;">Sin cuentas</div>';return;}
-            let h='';for(const x of c){h+=`<div class="row"><div><strong>${x.etiqueta}</strong><br><span style="font-size:11px;color:var(--muted);">${x.lineas} items &middot; $${Number(x.total_parcial_usd).toFixed(2)}</span></div><span style="font-weight:600;">${Number(x.total_parcial_bs).toFixed(2)}</span></div>`;}cl.innerHTML=h;
-            const gl=document.getElementById('cuentas-gestion-list');if(gl){if(!c.length){gl.innerHTML='<div style="text-align:center;color:var(--muted);padding:12px;">Sin cuentas</div>';}else{let g='';for(const x of c){g+=`<div class="row"><div><strong>${x.etiqueta}</strong><br><span style="font-size:11px;color:var(--muted);${x.tipo==='deuda'?';color:#991b1b':''}">${x.tipo||'activa'} &middot; ${x.lineas} items &middot; $${Number(x.total_parcial_usd).toFixed(2)}</span></div><span class="badge badge-blue">${x.tipo||'act'}</span></div>`;}gl.innerHTML=g;}
+            let h='';for(const x of c){h+=`<div class="row"><div><strong>${x.etiqueta}</strong><br><span style="font-size:11px;color:var(--muted);">${x.lineas} items &middot; $${Number(x.totalParcialUsd).toFixed(2)}</span></div><span style="font-weight:600;">${Number(x.totalParcialBs).toFixed(2)}</span></div>`;}cl.innerHTML=h;
+            const gl=document.getElementById('cuentas-gestion-list');if(gl){if(!c.length){gl.innerHTML='<div style="text-align:center;color:var(--muted);padding:12px;">Sin cuentas</div>';}else{let g='';for(const x of c){g+=`<div class="row"><div><strong>${x.etiqueta}</strong><br><span style="font-size:11px;color:var(--muted);${x.tipo==='deuda'?';color:#991b1b':''}">${x.tipo||'activa'} &middot; ${x.lineas} items &middot; $${Number(x.totalParcialUsd).toFixed(2)}</span></div><span class="badge badge-blue">${x.tipo||'act'}</span></div>`;}gl.innerHTML=g;}
         }
         function renderProductos(p) {
             const sl=document.getElementById('productos-list');if(!sl)return;
             const q=(document.getElementById('buscar-productos')?.value||'').trim().toLowerCase();
             const f=p.filter(x=>x.nombre.toLowerCase().includes(q)||x.sku.toLowerCase().includes(q));
-            let h='';for(const x of f){const isCrit=x.stock<=5;h+=`<div class="row"><div><strong>${x.nombre}</strong><br><span style="font-size:11px;color:var(--muted);">${x.sku} &middot; $${Number(x.precio_usd).toFixed(2)}</span></div><span class="badge ${isCrit?'badge-red':'badge-green'}">${x.stock}</span></div>`;}
+            let h='';for(const x of f){const isCrit=x.stock<=5;h+=`<div class="row"><div><strong>${x.nombre}</strong><br><span style="font-size:11px;color:var(--muted);">${x.sku} &middot; $${Number(x.precioUsd).toFixed(2)}</span></div><span class="badge ${isCrit?'badge-red':'badge-green'}">${x.stock}</span></div>`;}
             sl.innerHTML=h||'<div style="text-align:center;color:var(--muted);padding:12px;">Sin productos</div>';
         }
         function renderTopChart(top,len) {
@@ -437,9 +437,9 @@
         function renderJornada(j,jornadas) {
             const info=document.getElementById('jornada-info'),acts=document.getElementById('jornada-actions'),hist=document.getElementById('jornadas-historial');
             if(!info)return;
-            if(j){info.innerHTML=`<div class="row"><div><strong>${j.id}</strong><br><span style="font-size:11px;color:var(--muted);">Operador: ${j.operador_actual} &middot; Tickets: ${j.tickets_emitidos}</span></div><span class="badge badge-green">Abierta</span></div>`;acts.innerHTML='<button class="btn btn-danger btn-sm" onclick="cerrarJornada()">Cerrar</button>';}
+            if(j){info.innerHTML=`<div class="row"><div><strong>${j.id}</strong><br><span style="font-size:11px;color:var(--muted);">Operador: ${j.operadorActual} &middot; Tickets: ${j.ticketsEmitidos}</span></div><span class="badge badge-green">Abierta</span></div>`;acts.innerHTML='<button class="btn btn-danger btn-sm" onclick="cerrarJornada()">Cerrar</button>';}
             else{info.innerHTML='<div style="text-align:center;color:var(--muted);padding:12px;">Sin jornada abierta</div>';acts.innerHTML='<button class="btn btn-primary btn-sm" onclick="abrirJornada()">Abrir</button>';}
-            if(hist&&jornadas){let h='';for(const j of jornadas){h+=`<div class="row"><div><strong>${j.id}</strong><br><span style="font-size:11px;color:var(--muted);">${j.operador_actual} &middot; ${j.tickets_emitidos} tickets</span></div><span class="badge ${j.estado==='abierta'?'badge-green':'badge-blue'}">${j.estado}</span></div>`;}hist.innerHTML=h;}
+            if(hist&&jornadas){let h='';for(const j of jornadas){h+=`<div class="row"><div><strong>${j.id}</strong><br><span style="font-size:11px;color:var(--muted);">${j.operadorActual} &middot; ${j.ticketsEmitidos} tickets</span></div><span class="badge ${j.estado==='abierta'?'badge-green':'badge-blue'}">${j.estado}</span></div>`;}hist.innerHTML=h;}
         }
         function renderMetodos(m) {
             const el=document.getElementById('metodos-list');if(!el)return;

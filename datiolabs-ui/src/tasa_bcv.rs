@@ -43,6 +43,8 @@ pub struct TasaInfo {
     pub fecha_unix: i64,
     pub fluctuacion_pct: Option<Decimal>,
     pub direccion: Option<DireccionTasa>,
+    #[serde(default)]
+    pub fuente: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,6 +112,7 @@ impl ServicioTasa {
                     fecha_unix: 0,
                     fluctuacion_pct: None,
                     direccion: None,
+                    fuente: Some("BCV".to_string()),
                 };
             }
         };
@@ -134,6 +137,7 @@ impl ServicioTasa {
             fecha_unix: actual.fecha_unix,
             fluctuacion_pct,
             direccion,
+            fuente: Some("BCV".to_string()),
         }
     }
 
@@ -178,6 +182,7 @@ impl ServicioTasa {
                 fecha_unix: p.fecha_unix,
                 fluctuacion_pct,
                 direccion,
+                fuente: Some("BCV".to_string()),
             }
         })
     }
