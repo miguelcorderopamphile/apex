@@ -441,7 +441,12 @@ class AppController {
                 }
             };
             this.wsSignaling.onclose = () => {
-                this.actualizarEstadoP2P('disconnected', 'Desconectado del servidor de senalizacion');
+                this.actualizarEstadoP2P('disconnected', 'Desconectado del servidor de senalizacion. Reconectando...');
+                setTimeout(() => {
+                    if (this.wsSignaling && this.wsSignaling.readyState === WebSocket.CLOSED) {
+                        this.conectarSignaling(roomId);
+                    }
+                }, 3000);
             };
             this.wsSignaling.onerror = () => {
                 this.actualizarEstadoP2P('error', 'Error de conexion al servidor de senalizacion');
@@ -511,34 +516,28 @@ class AppController {
             const msg = JSON.parse(data);
             const { id, method, path, body } = msg;
 
-            let statusCode = 200;
-            let responseBody: unknown = null;
-
             try {
                 const opts: RequestInit = { method: method || 'GET' };
-                if (body) opts.body = body;
-                const res = await fetch(`/api${path}`, {
+                if (body) opts.body = typeof body === 'string' ? body : JSON.stringify(body);
+                const res = await fetch(`http://localhost:4000/api${path}`, {
                     ...opts,
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'include',
                 });
-                statusCode = res.status;
                 if (res.status === 401) {
-                    responseBody = { error: 'Unauthorized' };
-                } else {
-                    responseBody = await res.json();
+                    if (this.dataChannel && this.dataChannel.readyState === 'open') {
+                        this.dataChannel.send(JSON.stringify({ id, error: 'Unauthorized' }));
+                    }
+                    return;
+                }
+                const responseBody = await res.json();
+                if (this.dataChannel && this.dataChannel.readyState === 'open') {
+                    this.dataChannel.send(JSON.stringify({ id, body: responseBody }));
                 }
             } catch (e) {
-                statusCode = 500;
-                responseBody = { error: String(e) };
-            }
-
-            if (this.dataChannel && this.dataChannel.readyState === 'open') {
-                this.dataChannel.send(JSON.stringify({
-                    id,
-                    status: statusCode,
-                    body: responseBody,
-                }));
+                if (this.dataChannel && this.dataChannel.readyState === 'open') {
+                    this.dataChannel.send(JSON.stringify({ id, error: String(e) }));
+                }
             }
         } catch (e) {
             console.error('[P2P] Error handling message:', e);

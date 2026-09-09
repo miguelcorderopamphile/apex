@@ -349,8 +349,6 @@
             peerConnection.onconnectionstatechange = () => { p2pConnected=peerConnection.connectionState==='connected'; updateConnBadge(); };
             peerConnection.ondatachannel = (e) => setupDataChannel(e.channel);
             await peerConnection.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-            dataChannel = peerConnection.createDataChannel('api',{ordered:true});
-            setupDataChannel(dataChannel);
             const answer = await peerConnection.createAnswer();
             await peerConnection.setLocalDescription(answer);
             wsSignaling.send(JSON.stringify({type:'answer',sdp:peerConnection.localDescription}));

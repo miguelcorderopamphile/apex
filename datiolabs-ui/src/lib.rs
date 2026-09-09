@@ -451,11 +451,13 @@ async fn api_tasa_pendiente(
 }
 
 async fn api_tasa_aplicar(State(state): State<AxumAppState>) -> Result<Json<TasaInfo>, (StatusCode, String)> {
-    state
+    let result = state
         .servicio_tasa
         .aplicar_tasa_pendiente()
         .map(Json)
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Solicitud inválida: {e}")))
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Solicitud inválida: {e}")))?;
+    let _ = state.tx.send(());
+    Ok(result)
 }
 
 #[derive(Deserialize)]
@@ -469,11 +471,13 @@ async fn api_tasa_manual(
 ) -> Result<Json<TasaInfo>, (StatusCode, String)> {
     let valor = Decimal::from_str(&payload.valor.trim().replace(',', "."))
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Solicitud inválida: {e}")))?;
-    state
+    let result = state
         .servicio_tasa
         .establecer_tasa_manual(valor)
         .map(Json)
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Solicitud inválida: {e}")))
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Solicitud inválida: {e}")))?;
+    let _ = state.tx.send(());
+    Ok(result)
 }
 
 async fn api_sse_events(
@@ -1401,6 +1405,8 @@ async fn api_respaldos_restaurar(state: State<AxumAppState>, Json(body): Json<Ha
     };
     let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     db.importar_backup(&ruta).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error al restaurar: {e}")))?;
+    drop(db);
+    let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -3769,13 +3775,13 @@ pub fn run() {
                     .route("/api/auth/logout", post(api_auth_logout))
                     .route("/api/events", get(api_sse_events))
                     .route("/ws/signaling", get(ws_signaling_handler))
-                    .route("/panel", get(serve_panel_html))
-                    .layer(cors.clone());
+                    .route("/panel", get(serve_panel_html));
 
                 let app = Router::new()
                     .merge(public)
                     .merge(protected)
                     .layer(axum::extract::DefaultBodyLimit::max(2 * 1024 * 1024))
+                    .layer(cors)
                     .with_state(AxumAppState {
                         ledger: ledger_for_axum,
                         servicio_tasa: servicio_tasa_for_axum,
