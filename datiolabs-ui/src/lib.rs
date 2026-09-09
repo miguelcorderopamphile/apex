@@ -1257,31 +1257,71 @@ async fn api_config_privacidad(State(state): State<AxumAppState>, Json(body): Js
 
 // Respaldos
 async fn api_respaldos_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<RespaldoInfo>>, (StatusCode, String)> {
+    use datiolabs_core::db::BackupMetadata;
+    use std::io::{BufReader, Read, Seek, SeekFrom};
     let dir = get_backup_dir().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error directorio: {e}")))?;
-    let archivos = std::fs::read_dir(&dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error directorio: {e}")))?;
     let mut infos = Vec::new();
-    for entrada in archivos.flatten() {
-        let ruta = entrada.path();
-        if ruta.extension().map(|e| e == "backup").unwrap_or(false) {
-            if let Ok(bytes) = std::fs::read(&ruta) {
-                let tamano_kb = (bytes.len() as u64) / 1024;
-                if bytes.len() > 44 {
-                    let meta: Result<datiolabs_core::db::BackupMetadata, _> = bincode::deserialize(&bytes[44..]);
-                    if let Ok(meta) = meta {
-                        let archivo_nombre = ruta.file_name().unwrap_or_default().to_string_lossy().to_string();
-                        let id = archivo_nombre.replace(".backup", "");
-                        let fecha = chrono::DateTime::from_timestamp(meta.timestamp_unix, 0)
-                            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
-                            .unwrap_or_default();
-                        infos.push(RespaldoInfo {
-                            id,
-                            fecha,
-                            archivo_nombre,
-                            registros: meta.total_registros,
-                            tamano_kb,
-                            checksum_sha256: meta.checksum_sha256,
-                        });
-                    }
+    for entry in std::fs::read_dir(&dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error directorio: {e}")))? {
+        let entry = entry.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error entrada: {e}")))?;
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("backup") {
+            continue;
+        }
+        let archivo_nombre = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let file_size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        let tamano_kb = file_size / 1024;
+        let file = match std::fs::File::open(&path) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        let mut reader = BufReader::new(file);
+        let header: datiolabs_core::db::BackupHeader = match bincode::deserialize_from(&mut reader) {
+            Ok(h) => h,
+            Err(_) => continue,
+        };
+        let mut len_buf = [0u8; 4];
+        let mut ok = true;
+        for _ in 0..header.arboles_count {
+            if reader.read_exact(&mut len_buf).is_err() { ok = false; break; }
+            let nombre_len = u32::from_le_bytes(len_buf) as i64;
+            if reader.seek(SeekFrom::Current(nombre_len)).is_err() { ok = false; break; }
+            if reader.read_exact(&mut len_buf).is_err() { ok = false; break; }
+            let cant_registros = u32::from_le_bytes(len_buf);
+            for _ in 0..cant_registros {
+                if reader.read_exact(&mut len_buf).is_err() { ok = false; break; }
+                let clave_len = u32::from_le_bytes(len_buf) as i64;
+                if reader.seek(SeekFrom::Current(clave_len)).is_err() { ok = false; break; }
+                if reader.read_exact(&mut len_buf).is_err() { ok = false; break; }
+                let valor_len = u32::from_le_bytes(len_buf) as i64;
+                if reader.seek(SeekFrom::Current(valor_len)).is_err() { ok = false; break; }
+            }
+            if !ok { break; }
+        }
+        if !ok { continue; }
+        let metadata_len = file_size - reader.stream_position().unwrap_or(0);
+        if metadata_len == 0 || metadata_len > 1024 * 1024 { continue; }
+        let mut metadata_buf = vec![0u8; metadata_len as usize];
+        if reader.read_exact(&mut metadata_buf).is_err() { continue; }
+        let meta: BackupMetadata = match bincode::deserialize(&metadata_buf) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let fecha = chrono::DateTime::from_timestamp(meta.timestamp_unix, 0)
+            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+            .unwrap_or_default();
+        let id = archivo_nombre.replace(".backup", "");
+        infos.push(RespaldoInfo {
+            id,
+            fecha,
+            archivo_nombre,
+            registros: meta.total_registros,
+            tamano_kb,
+            checksum_sha256: meta.checksum_sha256,
+        });
+    }
+    infos.sort_by(|a, b| b.fecha.cmp(&a.fecha));
+    Ok(Json(infos))
+}
                 }
             }
         }
@@ -3455,34 +3495,26 @@ fn crear_respaldo(estado: tauri::State<AppState>) -> Result<RespaldoInfo, UIErro
 #[tauri::command]
 fn listar_respaldos(estado: tauri::State<AppState>) -> Result<Vec<RespaldoInfo>, UIError> {
     let dir = get_backup_dir()?;
-    let archivos = std::fs::read_dir(&dir).map_err(|e| UIError::new("error directorio", &e.to_string()))?;
+    let ledger = estado.db.lock().map_err(|e| UIError::new("lock", &e.to_string()))?;
+    let metas = ledger.listar_backups(&dir).map_err(|e| UIError::new("error listando respaldos", &e.to_string()))?;
     let mut infos = Vec::new();
-    for entrada in archivos.flatten() {
-        let ruta = entrada.path();
-        if ruta.extension().map(|e| e == "backup").unwrap_or(false) {
-            if let Ok(bytes) = std::fs::read(&ruta) {
-                let tamano_kb = (bytes.len() as u64) / 1024;
-                if bytes.len() > 44 {
-                    let meta: Result<BackupMetadata, _> = bincode::deserialize(&bytes[44..]);
-                    if let Ok(meta) = meta {
-                        let archivo_nombre = ruta.file_name().unwrap_or_default().to_string_lossy().to_string();
-                        let id = archivo_nombre.replace(".backup", "");
-                        let fecha = chrono::DateTime::from_timestamp(meta.timestamp_unix, 0)
-                            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
-                            .unwrap_or_default();
-                        infos.push(RespaldoInfo {
-                            id,
-                            fecha,
-                            archivo_nombre,
-                            registros: meta.total_registros,
-                            tamano_kb,
-                            checksum_sha256: meta.checksum_sha256,
-                        });
-                    }
-                }
-            }
-        }
+    for meta in metas {
+        let fecha = chrono::DateTime::from_timestamp(meta.timestamp_unix, 0)
+            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+            .unwrap_or_default();
+        let archivo_nombre = format!("{}.backup", meta.timestamp_unix);
+        let ruta = std::path::Path::new(&dir).join(&archivo_nombre);
+        let tamano_kb = std::fs::metadata(&ruta).ok().map(|m| m.len() / 1024).unwrap_or(0);
+        infos.push(RespaldoInfo {
+            id: fecha.clone(),
+            fecha,
+            archivo_nombre,
+            registros: meta.total_registros,
+            tamano_kb,
+            checksum_sha256: meta.checksum_sha256,
+        });
     }
+    infos.sort_by(|a, b| b.fecha.cmp(&a.fecha));
     Ok(infos)
 }
 

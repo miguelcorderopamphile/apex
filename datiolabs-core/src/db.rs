@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
 #[derive(Serialize, Deserialize)]
-struct BackupHeader {
+pub struct BackupHeader {
     version: u32,
     timestamp_unix: i64,
     arboles_count: u32,

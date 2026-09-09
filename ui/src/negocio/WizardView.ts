@@ -345,12 +345,10 @@ export class WizardView {
             // Restaurar datos y purgar conexiones móviles por seguridad
             await api.restaurarRespaldo(nombreArchivo);
 
-            // Inicializar negocio con los datos restaurados
-            const nombreNegocio = nombreArchivo.split('-')[0] || 'Mi Negocio Restaurado';
-            await this.modelo.inicializar(nombreNegocio, RUBRO_ABASTO | RUBRO_PANADERIA | RUBRO_LICORERIA, pin);
-
-            const cfg = this.modelo.getConfig();
+            // Config ya viene en el respaldo, solo cargar
+            const cfg = await api.config();
             if (cfg) this.alTerminar(cfg);
+            else throw new Error('Respaldo restaurado pero no se pudo cargar la configuración');
         } catch (e) {
             if (errorBox) {
                 errorBox.textContent = e instanceof Error ? e.message : String(e);
