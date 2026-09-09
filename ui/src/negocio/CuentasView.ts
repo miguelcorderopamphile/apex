@@ -1006,7 +1006,6 @@ export class CuentasView {
             this.modal.querySelector<HTMLInputElement>("#input-tasa-abono")?.addEventListener("input", (e) => {
                 tasaMetodo = parseNum((e.target as HTMLInputElement).value);
                 updatePreviewAbono();
-                inp?.focus();
             });
 
             // Reset tasa button
