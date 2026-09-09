@@ -39,7 +39,7 @@ jobs:
           npx vite build
 
       - name: Install Tauri CLI
-        run: cargo binstall --no-confirm tauri-cli@^2.0.0
+        run: cargo install tauri-cli --version "^2.0.0"
 
       - name: Build Tauri Windows Installer
         run: cargo tauri build --target x86_64-pc-windows-msvc
