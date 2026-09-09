@@ -279,6 +279,7 @@ export interface TasaActual {
     fechaUnix: number;
     fluctuacionPct: string | null;
     direccion: 'subio' | 'bajo' | 'estable' | null;
+    fuente?: string;
 }
 
 export class ApiError extends Error {

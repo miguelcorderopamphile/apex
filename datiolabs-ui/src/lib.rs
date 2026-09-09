@@ -703,7 +703,9 @@ async fn api_cuentas_eliminar_consumo(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let sin_stock = tree_p.get(sku_removed.as_bytes())
         .ok().flatten()
-        .and_then(|v| bincode::deserialize::<datiolabs_core::models::Producto>(&v).ok())
+        .and_then(|v| bincode::deserialize::<datiolabs_core::models::Producto>(&v)
+            .or_else(|_| serde_json::from_slice::<datiolabs_core::models::Producto>(&v))
+            .ok())
         .map(|p| p.sin_stock)
         .unwrap_or(false);
     if !sin_stock {
@@ -1368,7 +1370,10 @@ async fn api_historico_tasas(State(state): State<AxumAppState>) -> Result<Json<V
     let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let tasas = db.ultimas_tasas(50).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let result: Vec<serde_json::Value> = tasas.iter().enumerate().map(|(i, t)| {
-        serde_json::json!({ "id": format!("tasa-{}", i), "valor": t.valor_bs_por_usd.to_string(), "tipo": "automatico" })
+        let fuente_len = t.fuente_len as usize;
+        let fuente_str = std::str::from_utf8(&t.fuente[..fuente_len]).unwrap_or("BCV");
+        let tipo = if fuente_str == "MANUAL" { "manual" } else { "automatico" };
+        serde_json::json!({ "id": format!("tasa-{}", i), "valor": t.valor_bs_por_usd.to_string(), "tipo": tipo })
     }).collect();
     Ok(Json(result))
 }
@@ -1893,7 +1898,11 @@ fn listar_productos(estado: tauri::State<AppState>) -> Result<Vec<ProductoDto>, 
     let tree = db.inner_db().open_tree("productos").map_err(|e| UIError::new("error db", &e.to_string()))?;
     let filas: Vec<ProductoDto> = tree.iter()
         .filter_map(|r| r.ok())
-        .filter_map(|(_, v)| bincode::deserialize::<Producto>(&v).ok())
+        .filter_map(|(_, v)| {
+            bincode::deserialize::<Producto>(&v)
+                .or_else(|_| serde_json::from_slice::<Producto>(&v))
+                .ok()
+        })
         .map(|p| ProductoDto {
             sku: p.sku,
             nombre: p.nombre,
@@ -2638,7 +2647,9 @@ fn obtener_tasa_bcv(state: tauri::State<AppState>) -> Result<TasaInfo, UIError> 
 
 #[tauri::command]
 async fn forzar_actualizacion_tasa(state: tauri::State<'_, AppState>) -> Result<TasaInfo, UIError> {
-    state.servicio_tasa.refrescar().await
+    let resultado = state.servicio_tasa.refrescar().await;
+    notificar_panel(&state);
+    resultado
 }
 
 #[tauri::command]
@@ -2923,6 +2934,7 @@ fn get_backup_dir() -> Result<String, UIError> {
         .unwrap_or_else(|| std::env::temp_dir())
         .join("DatioLabs")
         .join("backups");
+    std::fs::create_dir_all(&dir).map_err(|e| UIError::new("error creando directorio de respaldos", &e.to_string()))?;
     Ok(dir.to_string_lossy().to_string())
 }
 
@@ -3368,7 +3380,9 @@ fn eliminar_consumo(
         venta.lineas.tasas_bloqueadas.remove(consumo_idx);
         let tree_p = db.inner_db().open_tree("productos")?;
         let sin_stock = tree_p.get(sku.as_bytes())?
-            .and_then(|v| bincode::deserialize::<Producto>(&v).ok())
+            .and_then(|v| bincode::deserialize::<Producto>(&v)
+                .or_else(|_| serde_json::from_slice::<Producto>(&v))
+                .ok())
             .map(|p| p.sin_stock)
             .unwrap_or(false);
         if !sin_stock {
@@ -3462,7 +3476,11 @@ fn listar_historico_tasas(estado: tauri::State<AppState>) -> Result<Vec<Registro
         fecha_hora: chrono::DateTime::from_timestamp(t.fecha_unix, 0)
             .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
             .unwrap_or_default(),
-        tipo: "automatico".to_string(),
+        tipo: {
+            let fuente_len = t.fuente_len as usize;
+            let fuente_str = std::str::from_utf8(&t.fuente[..fuente_len]).unwrap_or("BCV");
+            if fuente_str == "MANUAL" { "manual".to_string() } else { "automatico".to_string() }
+        },
     }).collect())
 }
 

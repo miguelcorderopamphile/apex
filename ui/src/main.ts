@@ -31,6 +31,7 @@ class AppController {
     private peerConnection: RTCPeerConnection | null = null;
     private dataChannel: RTCDataChannel | null = null;
     private wsSignaling: WebSocket | null = null;
+    private offerResendTimer: ReturnType<typeof setInterval> | null = null;
 
     private readonly STUN_SERVERS: RTCConfiguration = {
         iceServers: [
@@ -386,6 +387,7 @@ class AppController {
             this.wsSignaling.onmessage = async (event) => {
                 const msg = JSON.parse(event.data);
                 if (msg.type === 'answer' && this.peerConnection) {
+                    if (this.offerResendTimer) { clearInterval(this.offerResendTimer); this.offerResendTimer = null; }
                     await this.peerConnection.setRemoteDescription(new RTCSessionDescription(msg.sdp));
                     this.actualizarEstadoP2P('connected', 'Conexion P2P establecida');
                 } else if (msg.type === 'ice-candidate' && this.peerConnection) {
@@ -430,6 +432,7 @@ class AppController {
 
         this.dataChannel = this.peerConnection.createDataChannel('api', { ordered: true });
         this.dataChannel.onopen = () => {
+            if (this.offerResendTimer) { clearInterval(this.offerResendTimer); this.offerResendTimer = null; }
             this.actualizarEstadoP2P('connected', 'DataChannel abierto - Listo para recibir solicitudes');
         };
         this.dataChannel.onclose = () => {
@@ -449,6 +452,16 @@ class AppController {
             }));
         }
         this.actualizarEstadoP2P('connecting', 'Oferta P2P enviada, esperando respuesta...');
+
+        if (this.offerResendTimer) clearInterval(this.offerResendTimer);
+        this.offerResendTimer = setInterval(() => {
+            if (this.peerConnection && this.wsSignaling && this.wsSignaling.readyState === WebSocket.OPEN) {
+                this.wsSignaling.send(JSON.stringify({
+                    type: 'offer',
+                    sdp: this.peerConnection.localDescription,
+                }));
+            }
+        }, 2000);
     }
 
     private async handleDataChannelMessage(data: string): Promise<void> {
@@ -504,6 +517,7 @@ class AppController {
     }
 
     private desconectarP2P(): void {
+        if (this.offerResendTimer) { clearInterval(this.offerResendTimer); this.offerResendTimer = null; }
         if (this.dataChannel) { this.dataChannel.close(); this.dataChannel = null; }
         if (this.peerConnection) { this.peerConnection.close(); this.peerConnection = null; }
         if (this.wsSignaling) { this.wsSignaling.close(); this.wsSignaling = null; }

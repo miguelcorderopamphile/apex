@@ -51,6 +51,8 @@ pub struct TasaInfo {
 struct CacheTasa {
     valor: Decimal,
     fecha_unix: i64,
+    #[serde(default)]
+    fuente: String,
 }
 
 #[derive(Default)]
@@ -82,9 +84,16 @@ impl ServicioTasa {
                 .ok()
                 .and_then(|db| db.ultimas_tasas(1).ok())
                 .and_then(|tasas| tasas.into_iter().next())
-                .map(|t| CacheTasa {
-                    valor: t.valor_bs_por_usd,
-                    fecha_unix: t.fecha_unix,
+                .map(|t| {
+                    let fuente_len = t.fuente_len as usize;
+                    let fuente_str = std::str::from_utf8(&t.fuente[..fuente_len])
+                        .unwrap_or("BCV")
+                        .to_string();
+                    CacheTasa {
+                        valor: t.valor_bs_por_usd,
+                        fecha_unix: t.fecha_unix,
+                        fuente: fuente_str,
+                    }
                 })
         });
         Ok(Self {
@@ -137,7 +146,7 @@ impl ServicioTasa {
             fecha_unix: actual.fecha_unix,
             fluctuacion_pct,
             direccion,
-            fuente: Some("BCV".to_string()),
+            fuente: Some(if actual.fuente.is_empty() { "BCV".to_string() } else { actual.fuente.clone() }),
         }
     }
 
@@ -163,8 +172,24 @@ impl ServicioTasa {
                 .snapshot
                 .write()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            guardia.pendiente = Some(CacheTasa { valor, fecha_unix });
+            let anterior = guardia.actual.take().map(|a| a.valor);
+            guardia.actual = Some(CacheTasa { valor, fecha_unix, fuente: FUENTE.to_string() });
+            guardia.anterior = anterior;
+            guardia.pendiente = None;
         }
+
+        if let Some(db) = self.ledger.lock().ok().as_deref() {
+            let (fuente_arr, fuente_len) = fuente_bytes(FUENTE);
+            let _ = db.insertar_tasa(EventoTasaBcv {
+                valor_bs_por_usd: valor,
+                fecha_unix,
+                fuente: fuente_arr,
+                fuente_len,
+                firma_sha256: String::new(),
+            });
+        }
+
+        guardar_cache(&self.ruta_cache, &CacheTasa { valor, fecha_unix, fuente: FUENTE.to_string() });
 
         Ok(self.info_actual())
     }
@@ -182,42 +207,45 @@ impl ServicioTasa {
                 fecha_unix: p.fecha_unix,
                 fluctuacion_pct,
                 direccion,
-                fuente: Some("BCV".to_string()),
+                fuente: Some(p.fuente.clone()),
             }
         })
     }
 
     pub fn aplicar_tasa_pendiente(&self) -> Result<TasaInfo, UIError> {
-        let mut guardia = self
-            .snapshot
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let pendiente = match guardia.pendiente.take() {
-            Some(p) => p,
-            None => {
-                return Err(UIError::new(
-                    "sin tasa pendiente",
-                    "No hay tasa scrappeada por confirmar",
-                ));
+        let pendiente = {
+            let mut guardia = self
+                .snapshot
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            match guardia.pendiente.take() {
+                Some(p) => {
+                    let anterior = guardia.actual.take().map(|a| a.valor);
+                    guardia.actual = Some(p.clone());
+                    guardia.anterior = anterior;
+                    p
+                }
+                None => {
+                    return Err(UIError::new(
+                        "sin tasa pendiente",
+                        "No hay tasa scrappeada por confirmar",
+                    ));
+                }
             }
         };
 
         if let Some(db) = self.ledger.lock().ok().as_deref() {
-            let (fuente_arr, fuente_len) = fuente_bytes(FUENTE);
-            db.insertar_tasa(EventoTasaBcv {
+            let (fuente_arr, fuente_len) = fuente_bytes(&pendiente.fuente);
+            let _ = db.insertar_tasa(EventoTasaBcv {
                 valor_bs_por_usd: pendiente.valor,
                 fecha_unix: pendiente.fecha_unix,
                 fuente: fuente_arr,
                 fuente_len,
                 firma_sha256: String::new(),
-            })?;
+            });
         }
 
         guardar_cache(&self.ruta_cache, &pendiente);
-
-        let anterior = guardia.actual.take().map(|a| a.valor);
-        guardia.actual = Some(pendiente);
-        guardia.anterior = anterior;
 
         Ok(self.info_actual())
     }
@@ -236,26 +264,28 @@ impl ServicioTasa {
 
         if let Some(db) = self.ledger.lock().ok().as_deref() {
             let (fuente_arr, fuente_len) = fuente_bytes("MANUAL");
-            db.insertar_tasa(EventoTasaBcv {
+            let _ = db.insertar_tasa(EventoTasaBcv {
                 valor_bs_por_usd: valor,
                 fecha_unix,
                 fuente: fuente_arr,
                 fuente_len,
                 firma_sha256: String::new(),
-            })?;
+            });
         }
 
-        let cache = CacheTasa { valor, fecha_unix };
+        let cache = CacheTasa { valor, fecha_unix, fuente: "MANUAL".to_string() };
         guardar_cache(&self.ruta_cache, &cache);
 
-        let mut guardia = self
-            .snapshot
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let anterior = guardia.actual.take().map(|a| a.valor);
-        guardia.actual = Some(cache);
-        guardia.anterior = anterior;
-        guardia.pendiente = None;
+        {
+            let mut guardia = self
+                .snapshot
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let anterior = guardia.actual.take().map(|a| a.valor);
+            guardia.actual = Some(cache);
+            guardia.anterior = anterior;
+            guardia.pendiente = None;
+        }
 
         Ok(self.info_actual())
     }
