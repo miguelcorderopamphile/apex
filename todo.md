@@ -38,10 +38,11 @@
   - Timeout después de ~90 segundos sin conexión.
   - No es verdadero P2P (WebRTC), es dependiente del servidor HTTP en el desktop.
 - **Fix Necesita arquitectura completa:**
-  - Mover signaling server a Cloudflare Workers (externo, no local en el desktop).
-  - STUN/TURN ya están configurados (Cloudflare, Google, OpenRelay) pero no se usan porque el signaling es local.
-  - Implementar autenticación P2P con PIN.
-  - Una vez establecido el DataChannel, la comunicación es directa peer-to-peer vía STUN/TURN.
+  - Crear Cloudflare Worker en `*.workers.dev` como signaling server (gratis, sin dominio propio, stateless).
+  - Worker solo retransmite SDP offers/answers/ICE candidates entre peers via WebSocket.
+  - STUN/TURN de Cloudflare ya están configurados en `STUN_SERVERS` (main.ts) — solo hay que asegurar que funcione con el signaling externo.
+  - Desktop y mobile se conectan al Worker, intercambian SDP → WebRTC P2P se establece → comunicación directa.
+  - Autenticación con PIN del dueño en el handshake.
 
 ## 8. Respaldos no se generan
 - **Archivo:** main.ts (ejecutarBackupAutomatico) + api.ts
