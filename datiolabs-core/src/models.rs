@@ -159,6 +159,20 @@ pub struct Producto {
     #[serde(with = "rust_decimal::serde::str")]
     pub stock: Decimal,
     pub capacidades: u16,
+    #[serde(default)]
+    pub categoria_id: Option<String>,
+    #[serde(default, with = "serde_opt_decimal_str")]
+    pub precio_bruto_usd: Option<Decimal>,
+    #[serde(default, with = "serde_opt_decimal_str")]
+    pub margen_pct: Option<Decimal>,
+    #[serde(default)]
+    pub sin_stock: bool,
+    #[serde(default)]
+    pub unidad: Option<String>,
+    #[serde(default)]
+    pub es_caja: bool,
+    #[serde(default)]
+    pub unidades_por_caja: Option<u32>,
 }
 
 /// Struct-of-Arrays catalog: column-contiguous layout saturating cache lines
@@ -259,6 +273,13 @@ impl Catalogo {
             impuesto_pct: self.impuestos_pct[idx],
             stock: self.stocks[idx],
             capacidades: self.capacidades[idx],
+            categoria_id: None,
+            precio_bruto_usd: None,
+            margen_pct: None,
+            sin_stock: false,
+            unidad: None,
+            es_caja: false,
+            unidades_por_caja: None,
         }
     }
 
@@ -372,6 +393,16 @@ pub struct Venta {
     pub fecha_apertura_unix: i64,
     pub fecha_cierre_unix: i64,
     pub firma_sha256: String,
+    #[serde(default)]
+    pub tipo: String,
+    #[serde(default)]
+    pub cliente: Option<String>,
+    #[serde(default)]
+    pub nota: Option<String>,
+    #[serde(default, with = "serde_opt_decimal_str")]
+    pub abonos_usd: Option<Decimal>,
+    #[serde(default, with = "serde_opt_decimal_str")]
+    pub abonos_bs: Option<Decimal>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -407,4 +438,82 @@ pub struct ConfigNegocio {
     pub licencia_titular: String,
     #[serde(default)]
     pub licencia_estado: String,
+    #[serde(default)]
+    pub privacidad_inventario: bool,
+}
+
+// ---------------- modelos nuevos para gestion ----------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Categoria {
+    pub id: String,
+    pub nombre: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TasaImpuesto {
+    pub id: String,
+    pub nombre: String,
+    pub porcentaje: Decimal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MetodoPagoConfig {
+    pub nombre: String,
+    pub moneda: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Operador {
+    pub id: String,
+    pub nombre: String,
+    pub activo: bool,
+    pub creado_unix: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Jornada {
+    pub id: String,
+    pub estado: String,
+    pub inicio_unix: i64,
+    pub fin_unix: Option<i64>,
+    pub operador_inicial: String,
+    pub operador_actual: String,
+    pub operadores_activos: Vec<String>,
+    pub operadores_relevo: Vec<String>,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub tasa_inicio: Decimal,
+    #[serde(default, with = "serde_opt_decimal_str")]
+    pub tasa_fin: Option<Decimal>,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub ventas_total_usd: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub ventas_total_bs: Decimal,
+    pub tickets_emitidos: u32,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub vuelto_pagado_bs: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub vuelto_retenido_bs: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub deudas_liquidadas_usd: Decimal,
+    pub entradas_stock_reg: u32,
+    pub mermas_stock_reg: u32,
+    pub cambios_precio_reg: u32,
+    #[serde(default)]
+    pub checksum_sha256: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DispositivoRemoto {
+    pub id: String,
+    pub nombre: String,
+    pub ip: String,
+    pub ultimo_acceso: String,
+    pub activo: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SemaforoStock {
+    pub rojo_max: u32,
+    pub amarillo_max: u32,
 }

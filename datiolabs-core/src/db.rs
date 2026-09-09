@@ -1,5 +1,8 @@
 use crate::capacidades::ErrorNegocio;
-use crate::models::{Catalogo, ConfigNegocio, EventoTasaBcv, MovimientoStock, Producto, Venta};
+use crate::models::{
+    Categoria, Catalogo, ConfigNegocio, DispositivoRemoto, EventoTasaBcv, Jornada,
+    MetodoPagoConfig, MovimientoStock, Operador, Producto, SemaforoStock, TasaImpuesto, Venta,
+};
 use crate::modulos::panaderia::{LibroLotes, Lote};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -23,6 +26,13 @@ const ARBOL_MOVIMIENTOS: &str = "movimientos";
 const ARBOL_LOTES: &str = "lotes";
 const ARBOL_CONFIG: &str = "config";
 const ARBOL_SESIONES: &str = "sesiones";
+const ARBOL_CATEGORIAS: &str = "categorias";
+const ARBOL_TASAS_IMPUESTOS: &str = "tasas_impuestos";
+const ARBOL_METODOS_PAGO: &str = "metodos_pago";
+const ARBOL_OPERADORES: &str = "operadores";
+const ARBOL_JORNADAS: &str = "jornadas";
+const ARBOL_DISPOSITIVOS: &str = "dispositivos";
+const ARBOL_SEMAFORO: &str = "semaforo_stock";
 const CLAVE_CONFIG: &[u8] = b"config";
 
 const TODOS_ARBOLES: &[&str] = &[
@@ -33,6 +43,13 @@ const TODOS_ARBOLES: &[&str] = &[
     ARBOL_LOTES,
     ARBOL_CONFIG,
     ARBOL_SESIONES,
+    ARBOL_CATEGORIAS,
+    ARBOL_TASAS_IMPUESTOS,
+    ARBOL_METODOS_PAGO,
+    ARBOL_OPERADORES,
+    ARBOL_JORNADAS,
+    ARBOL_DISPOSITIVOS,
+    ARBOL_SEMAFORO,
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,6 +145,182 @@ impl Database {
             Some(bytes) => Ok(Some(bincode::deserialize(&bytes)?)),
             None => Ok(None),
         }
+    }
+
+    /// Actualiza la configuracion existente. Rechaza si no existe.
+    pub fn actualizar_config(&self, config: &ConfigNegocio) -> Result<(), DbError> {
+        if self.cargar_config()?.is_none() {
+            return Err(DbError::Negocio(ErrorNegocio::YaInicializado));
+        }
+        let tree = self.db.open_tree(ARBOL_CONFIG)?;
+        tree.insert(CLAVE_CONFIG, bincode::serialize(config)?)?;
+        Ok(())
+    }
+
+    // ---------------- categorias ----------------
+
+    pub fn listar_categorias(&self) -> Result<Vec<Categoria>, DbError> {
+        let tree = self.db.open_tree(ARBOL_CATEGORIAS)?;
+        let mut cats = Vec::new();
+        for par in tree.iter() {
+            let (_, v) = par?;
+            cats.push(bincode::deserialize(&v)?);
+        }
+        Ok(cats)
+    }
+
+    pub fn guardar_categoria(&self, cat: &Categoria) -> Result<(), DbError> {
+        let tree = self.db.open_tree(ARBOL_CATEGORIAS)?;
+        tree.insert(cat.id.as_bytes(), bincode::serialize(cat)?)?;
+        Ok(())
+    }
+
+    pub fn eliminar_categoria(&self, id: &str) -> Result<(), DbError> {
+        let tree = self.db.open_tree(ARBOL_CATEGORIAS)?;
+        tree.remove(id.as_bytes())?;
+        Ok(())
+    }
+
+    // ---------------- tasas impuestos ----------------
+
+    pub fn listar_tasas_impuestos(&self) -> Result<Vec<TasaImpuesto>, DbError> {
+        let tree = self.db.open_tree(ARBOL_TASAS_IMPUESTOS)?;
+        let mut tasas = Vec::new();
+        for par in tree.iter() {
+            let (_, v) = par?;
+            tasas.push(bincode::deserialize(&v)?);
+        }
+        Ok(tasas)
+    }
+
+    pub fn guardar_tasa_impuesto(&self, t: &TasaImpuesto) -> Result<(), DbError> {
+        let tree = self.db.open_tree(ARBOL_TASAS_IMPUESTOS)?;
+        tree.insert(t.id.as_bytes(), bincode::serialize(t)?)?;
+        Ok(())
+    }
+
+    pub fn eliminar_tasa_impuesto(&self, id: &str) -> Result<(), DbError> {
+        let tree = self.db.open_tree(ARBOL_TASAS_IMPUESTOS)?;
+        tree.remove(id.as_bytes())?;
+        Ok(())
+    }
+
+    // ---------------- metodos de pago ----------------
+
+    pub fn listar_metodos_pago(&self) -> Result<Vec<MetodoPagoConfig>, DbError> {
+        let tree = self.db.open_tree(ARBOL_METODOS_PAGO)?;
+        let mut metodos = Vec::new();
+        for par in tree.iter() {
+            let (_, v) = par?;
+            metodos.push(bincode::deserialize(&v)?);
+        }
+        Ok(metodos)
+    }
+
+    pub fn guardar_metodo_pago(&self, m: &MetodoPagoConfig) -> Result<(), DbError> {
+        let tree = self.db.open_tree(ARBOL_METODOS_PAGO)?;
+        tree.insert(m.nombre.as_bytes(), bincode::serialize(m)?)?;
+        Ok(())
+    }
+
+    pub fn eliminar_metodo_pago(&self, nombre: &str) -> Result<(), DbError> {
+        let tree = self.db.open_tree(ARBOL_METODOS_PAGO)?;
+        tree.remove(nombre.as_bytes())?;
+        Ok(())
+    }
+
+    // ---------------- operadores ----------------
+
+    pub fn listar_operadores(&self) -> Result<Vec<Operador>, DbError> {
+        let tree = self.db.open_tree(ARBOL_OPERADORES)?;
+        let mut ops = Vec::new();
+        for par in tree.iter() {
+            let (_, v) = par?;
+            ops.push(bincode::deserialize(&v)?);
+        }
+        Ok(ops)
+    }
+
+    pub fn guardar_operador(&self, op: &Operador) -> Result<(), DbError> {
+        let tree = self.db.open_tree(ARBOL_OPERADORES)?;
+        tree.insert(op.id.as_bytes(), bincode::serialize(op)?)?;
+        Ok(())
+    }
+
+    pub fn eliminar_operador(&self, id: &str) -> Result<(), DbError> {
+        let tree = self.db.open_tree(ARBOL_OPERADORES)?;
+        tree.remove(id.as_bytes())?;
+        Ok(())
+    }
+
+    // ---------------- jornadas ----------------
+
+    pub fn jornada_actual(&self) -> Result<Option<Jornada>, DbError> {
+        let tree = self.db.open_tree(ARBOL_JORNADAS)?;
+        for par in tree.iter().rev() {
+            let (_, v) = par?;
+            let j: Jornada = bincode::deserialize(&v)?;
+            if j.estado == "abierta" {
+                return Ok(Some(j));
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn listar_jornadas(&self, limite: usize) -> Result<Vec<Jornada>, DbError> {
+        let tree = self.db.open_tree(ARBOL_JORNADAS)?;
+        let mut jornadas = Vec::with_capacity(limite.min(256));
+        for par in tree.iter().rev().take(limite) {
+            let (_, v) = par?;
+            jornadas.push(bincode::deserialize(&v)?);
+        }
+        Ok(jornadas)
+    }
+
+    pub fn guardar_jornada(&self, j: &Jornada) -> Result<(), DbError> {
+        let tree = self.db.open_tree(ARBOL_JORNADAS)?;
+        tree.insert(j.id.as_bytes(), bincode::serialize(j)?)?;
+        Ok(())
+    }
+
+    // ---------------- dispositivos ----------------
+
+    pub fn listar_dispositivos(&self) -> Result<Vec<DispositivoRemoto>, DbError> {
+        let tree = self.db.open_tree(ARBOL_DISPOSITIVOS)?;
+        let mut devs = Vec::new();
+        for par in tree.iter() {
+            let (_, v) = par?;
+            devs.push(bincode::deserialize(&v)?);
+        }
+        Ok(devs)
+    }
+
+    pub fn guardar_dispositivo(&self, d: &DispositivoRemoto) -> Result<(), DbError> {
+        let tree = self.db.open_tree(ARBOL_DISPOSITIVOS)?;
+        tree.insert(d.id.as_bytes(), bincode::serialize(d)?)?;
+        Ok(())
+    }
+
+    pub fn eliminar_dispositivo(&self, id: &str) -> Result<(), DbError> {
+        let tree = self.db.open_tree(ARBOL_DISPOSITIVOS)?;
+        tree.remove(id.as_bytes())?;
+        Ok(())
+    }
+
+    // ---------------- semaforo stock ----------------
+
+    pub fn cargar_semaforo(&self) -> Result<Option<SemaforoStock>, DbError> {
+        let tree = self.db.open_tree(ARBOL_SEMAFORO)?;
+        match tree.get(b"semaforo")? {
+            Some(v) => Ok(Some(bincode::deserialize(&v)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn guardar_semaforo(&self, s: &SemaforoStock) -> Result<(), DbError> {
+        let tree = self.db.open_tree(ARBOL_SEMAFORO)?;
+        tree.insert(b"semaforo", bincode::serialize(s)?)?;
+        Ok(())
     }
 
     // ---------------- productos ----------------
@@ -629,6 +822,13 @@ mod tests {
             impuesto_pct: dec!(16),
             stock: dec!(100),
             capacidades: CAP_UNITARIA,
+            categoria_id: None,
+            precio_bruto_usd: None,
+            margen_pct: None,
+            sin_stock: false,
+            unidad: None,
+            es_caja: false,
+            unidades_por_caja: None,
         }
     }
 
@@ -683,6 +883,11 @@ mod tests {
             fecha_apertura_unix: 1000,
             fecha_cierre_unix: 0,
             firma_sha256: String::new(),
+            tipo: "venta".to_string(),
+            cliente: None,
+            nota: None,
+            abonos_usd: None,
+            abonos_bs: None,
         }
     }
 

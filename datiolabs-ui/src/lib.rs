@@ -6,8 +6,9 @@ use datiolabs_core::capacidades::{
 };
 use datiolabs_core::db::{Database as Ledger, DbError};
 use datiolabs_core::models::{
-    Catalogo, ConfigNegocio, EstadoVenta, LineasVenta, MotivoMovimiento, MovimientoStock,
-    Nombre, PagoVenta, Producto, Sku, Venta,
+    Catalogo, Categoria, ConfigNegocio, DispositivoRemoto, EstadoVenta, Jornada, LineasVenta,
+    MetodoPagoConfig, MotivoMovimiento, MovimientoStock, Nombre, Operador, PagoVenta, Producto,
+    SemaforoStock, Sku, TasaImpuesto, Venta,
 };
 use datiolabs_core::modulos::licoreria;
 use datiolabs_core::modulos::panaderia::Lote;
@@ -522,11 +523,546 @@ async fn api_productos(
     Ok(Json(filas))
 }
 
+// ---------------- Axum handlers: escritura ----------------
+
+use axum::extract::{Path, Query};
+use std::collections::HashMap;
+
+async fn api_cuentas_abrir(
+    State(state): State<AxumAppState>,
+    Json(body): Json<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let etiqueta = body.get("etiqueta").cloned().unwrap_or_default();
+    let tipo = body.get("tipo").cloned();
+    let cliente = body.get("cliente").cloned();
+    let nota = body.get("nota").cloned();
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let tasa = state.servicio_tasa.info_actual().valor;
+    let venta = datiolabs_core::models::Venta {
+        id: uuid::Uuid::new_v4().to_string(),
+        etiqueta,
+        es_cuenta_abierta: true,
+        estado: datiolabs_core::models::EstadoVenta::Abierta,
+        lineas: datiolabs_core::models::LineasVenta::nuevas(),
+        tasa_del_dia: rust_decimal::Decimal::ZERO,
+        total_usd: rust_decimal::Decimal::ZERO,
+        total_bs: rust_decimal::Decimal::ZERO,
+        monto_recibido_bs: rust_decimal::Decimal::ZERO,
+        vuelto_bs: rust_decimal::Decimal::ZERO,
+        pagos: Vec::new(),
+        estado_vuelto: None,
+        metodo_vuelto: None,
+        monto_vuelto_usd: None,
+        tasa_vuelto: None,
+        fecha_apertura_unix: ahora_unix(),
+        fecha_cierre_unix: 0,
+        firma_sha256: String::new(),
+        tipo: tipo.unwrap_or_else(|| "activa".to_string()),
+        cliente,
+        nota,
+        abonos_usd: Some(rust_decimal::Decimal::ZERO),
+        abonos_bs: Some(rust_decimal::Decimal::ZERO),
+    };
+    let guardada = db.guardar_venta(venta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db);
+    let _ = state.tx.send(());
+    Ok(Json(serde_json::json!({ "ventaId": guardada.id })))
+}
+
+async fn api_cuentas_consumo(
+    State(state): State<AxumAppState>,
+    Path(id): Path<String>,
+    Json(body): Json<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let sku = body.get("sku").cloned().unwrap_or_default();
+    let cantidad = body.get("cantidad").cloned().unwrap_or_else(|| "1".to_string());
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut venta = db.cargar_venta(&id).ok().flatten()
+        .filter(|v| v.es_cuenta_abierta && v.estado == datiolabs_core::models::EstadoVenta::Abierta)
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let catalogo = db.cargar_catalogo().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let idx = catalogo.indice_de(&sku).ok_or(StatusCode::BAD_REQUEST)?;
+    let cant: rust_decimal::Decimal = cantidad.parse().map_err(|_| StatusCode::BAD_REQUEST)?;
+    let tasa = state.servicio_tasa.info_actual().valor;
+    venta.lineas.agregar(
+        catalogo.sku_obj(idx), catalogo.nombre_obj(idx),
+        cant, catalogo.precio_usd(idx), tasa,
+    );
+    db.guardar_venta(venta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db);
+    let _ = state.tx.send(());
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn api_cuentas_eliminar_consumo(
+    State(state): State<AxumAppState>,
+    Path((id, idx)): Path<(String, usize)>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut venta = db.cargar_venta(&id).ok().flatten()
+        .filter(|v| v.es_cuenta_abierta && v.estado == datiolabs_core::models::EstadoVenta::Abierta)
+        .ok_or(StatusCode::NOT_FOUND)?;
+    if idx >= venta.lineas.skus.len() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    venta.lineas.skus.remove(idx);
+    venta.lineas.nombres.remove(idx);
+    venta.lineas.cantidades.remove(idx);
+    venta.lineas.precios_usd.remove(idx);
+    venta.lineas.tasas_bloqueadas.remove(idx);
+    db.guardar_venta(venta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db);
+    let _ = state.tx.send(());
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn api_cuentas_abonar(
+    State(state): State<AxumAppState>,
+    Path(id): Path<String>,
+    Json(body): Json<HashMap<String, serde_json::Value>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let usd = body.get("montoUsd").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let bs = body.get("montoBs").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut venta = db.cargar_venta(&id).ok().flatten()
+        .filter(|v| v.es_cuenta_abierta && v.estado == datiolabs_core::models::EstadoVenta::Abierta)
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let usd_d = rust_decimal::Decimal::try_from(usd).unwrap_or(rust_decimal::Decimal::ZERO);
+    let bs_d = rust_decimal::Decimal::try_from(bs).unwrap_or(rust_decimal::Decimal::ZERO);
+    venta.abonos_usd = Some(venta.abonos_usd.unwrap_or(rust_decimal::Decimal::ZERO) + usd_d);
+    venta.abonos_bs = Some(venta.abonos_bs.unwrap_or(rust_decimal::Decimal::ZERO) + bs_d);
+    db.guardar_venta(venta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db);
+    let _ = state.tx.send(());
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn api_cuentas_cerrar(
+    State(state): State<AxumAppState>,
+    Path(id): Path<String>,
+    Json(body): Json<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let recibido = body.get("montoRecibidoBs").and_then(|v| v.parse::<rust_decimal::Decimal>().ok()).unwrap_or(rust_decimal::Decimal::ZERO);
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut venta = db.cargar_venta(&id).ok().flatten()
+        .filter(|v| v.es_cuenta_abierta && v.estado == datiolabs_core::models::EstadoVenta::Abierta)
+        .ok_or(StatusCode::NOT_FOUND)?;
+    venta.estado = datiolabs_core::models::EstadoVenta::Cerrada;
+    venta.total_usd = venta.lineas.total_usd();
+    venta.total_bs = venta.lineas.total_bs();
+    venta.monto_recibido_bs = recibido;
+    venta.vuelto_bs = if recibido > venta.total_bs { recibido - venta.total_bs } else { rust_decimal::Decimal::ZERO };
+    venta.fecha_cierre_unix = ahora_unix();
+    db.guardar_venta(venta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db);
+    let _ = state.tx.send(());
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn api_productos_crear(
+    State(state): State<AxumAppState>,
+    Json(body): Json<HashMap<String, serde_json::Value>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let sku = body.get("sku").and_then(|v| v.as_str()).unwrap_or("");
+    let nombre = body.get("nombre").and_then(|v| v.as_str()).unwrap_or("");
+    let precio = body.get("precioUsd").and_then(|v| v.as_str()).and_then(|s| s.parse::<rust_decimal::Decimal>().ok()).unwrap_or(rust_decimal::Decimal::ZERO);
+    let impuesto = body.get("impuestoPct").and_then(|v| v.as_str()).and_then(|s| s.parse::<rust_decimal::Decimal>().ok()).unwrap_or(rust_decimal::Decimal::ZERO);
+    let stock = body.get("stockInicial").and_then(|v| v.as_str()).and_then(|s| s.parse::<rust_decimal::Decimal>().ok()).unwrap_or(rust_decimal::Decimal::ZERO);
+    let caps = body.get("capacidades").and_then(|v| v.as_u64()).unwrap_or(1) as u16;
+    let p = datiolabs_core::models::Producto {
+        sku: datiolabs_core::models::Sku::new(sku).map_err(|_| StatusCode::BAD_REQUEST)?,
+        nombre: datiolabs_core::models::Nombre::new(nombre).map_err(|_| StatusCode::BAD_REQUEST)?,
+        precio_usd: precio, impuesto_pct: impuesto, stock, capacidades: caps,
+        categoria_id: body.get("categoriaId").and_then(|v| v.as_str()).map(String::from),
+        precio_bruto_usd: None, margen_pct: None, sin_stock: false,
+        unidad: body.get("unidad").and_then(|v| v.as_str()).map(String::from),
+        es_caja: false, unidades_por_caja: None,
+    };
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.guardar_producto(&p).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db);
+    let _ = state.tx.send(());
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn api_productos_eliminar(
+    State(state): State<AxumAppState>,
+    Path(sku): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let tree = db.inner_db().open_tree("productos").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tree.remove(sku.as_bytes()).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db);
+    let _ = state.tx.send(());
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn api_productos_compra(
+    State(state): State<AxumAppState>,
+    Path(sku): Path<String>,
+    Json(body): Json<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let cant = body.get("cantidad").and_then(|v| v.parse::<rust_decimal::Decimal>().ok()).unwrap_or(rust_decimal::Decimal::ZERO);
+    if cant <= rust_decimal::Decimal::ZERO { return Err(StatusCode::BAD_REQUEST); }
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mov = datiolabs_core::models::MovimientoStock {
+        id: uuid::Uuid::new_v4().to_string(), sku: sku.clone(),
+        delta: cant, motivo: datiolabs_core::models::MotivoMovimiento::Compra,
+        venta_id: None, fecha_unix: ahora_unix(), firma_sha256: String::new(),
+    };
+    db.aplicar_movimiento(mov, |_, _| {}).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db);
+    let _ = state.tx.send(());
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn api_productos_reducir(
+    State(state): State<AxumAppState>,
+    Path(sku): Path<String>,
+    Json(body): Json<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let cant = body.get("cantidad").and_then(|v| v.parse::<rust_decimal::Decimal>().ok()).unwrap_or(rust_decimal::Decimal::ZERO);
+    if cant <= rust_decimal::Decimal::ZERO { return Err(StatusCode::BAD_REQUEST); }
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mov = datiolabs_core::models::MovimientoStock {
+        id: uuid::Uuid::new_v4().to_string(), sku: sku.clone(),
+        delta: -cant, motivo: datiolabs_core::models::MotivoMovimiento::Ajuste,
+        venta_id: None, fecha_unix: ahora_unix(), firma_sha256: String::new(),
+    };
+    db.aplicar_movimiento(mov, |_, _| {}).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db);
+    let _ = state.tx.send(());
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn api_productos_merma(
+    State(state): State<AxumAppState>,
+    Path(sku): Path<String>,
+    Json(body): Json<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let cant = body.get("cantidad").and_then(|v| v.parse::<rust_decimal::Decimal>().ok()).unwrap_or(rust_decimal::Decimal::ZERO);
+    if cant <= rust_decimal::Decimal::ZERO { return Err(StatusCode::BAD_REQUEST); }
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mov = datiolabs_core::models::MovimientoStock {
+        id: uuid::Uuid::new_v4().to_string(), sku: sku.clone(),
+        delta: -cant, motivo: datiolabs_core::models::MotivoMovimiento::Merma,
+        venta_id: None, fecha_unix: ahora_unix(), firma_sha256: String::new(),
+    };
+    db.aplicar_movimiento(mov, |_, _| {}).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db);
+    let _ = state.tx.send(());
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn api_ventas_listar(
+    State(state): State<AxumAppState>,
+) -> Result<Json<Vec<serde_json::Value>>, StatusCode> {
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let ventas = db.ventas_recientes(200).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let result: Vec<serde_json::Value> = ventas.iter().map(|v| {
+        serde_json::json!({
+            "ventaId": v.id, "totalUsd": v.total_usd.to_string(),
+            "totalBs": v.total_bs.to_string(), "fechaHora": v.fecha_cierre_unix,
+        })
+    }).collect();
+    Ok(Json(result))
+}
+
+async fn api_ventas_registrar(
+    State(state): State<AxumAppState>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let items = body.get("items").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    if items.is_empty() { return Err(StatusCode::BAD_REQUEST); }
+    let tasa = state.servicio_tasa.info_actual().valor;
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let catalogo = db.cargar_catalogo().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut lineas = datiolabs_core::models::LineasVenta::nuevas();
+    for item in &items {
+        let sku_str = item.get("sku").and_then(|v| v.as_str()).unwrap_or("");
+        let cant: rust_decimal::Decimal = item.get("cantidad").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or(rust_decimal::Decimal::ONE);
+        if let Some(idx) = catalogo.indice_de(sku_str) {
+            lineas.agregar(catalogo.sku_obj(idx), catalogo.nombre_obj(idx), cant, catalogo.precio_usd(idx), tasa);
+        }
+    }
+    let total_bs = lineas.total_bs();
+    let venta = datiolabs_core::models::Venta {
+        id: uuid::Uuid::new_v4().to_string(), etiqueta: String::new(),
+        es_cuenta_abierta: false, estado: datiolabs_core::models::EstadoVenta::Cerrada,
+        lineas, tasa_del_dia: tasa, total_usd: lineas.total_usd(), total_bs,
+        monto_recibido_bs: total_bs, vuelto_bs: rust_decimal::Decimal::ZERO,
+        pagos: Vec::new(), estado_vuelto: Some("SIN_VUELTO".to_string()),
+        metodo_vuelto: None, monto_vuelto_usd: None, tasa_vuelto: None,
+        fecha_apertura_unix: ahora_unix(), fecha_cierre_unix: ahora_unix(),
+        firma_sha256: String::new(), tipo: "venta".to_string(),
+        cliente: None, nota: None, abonos_usd: None, abonos_bs: None,
+    };
+    db.guardar_venta(venta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db);
+    let _ = state.tx.send(());
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+// CRUD categorias
+async fn api_categorias_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::Categoria>>, StatusCode> {
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let cats = db.listar_categorias().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(cats))
+}
+async fn api_categorias_crear(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<Vec<datiolabs_core::models::Categoria>>, StatusCode> {
+    let nombre = body.get("nombre").cloned().unwrap_or_default();
+    let cat = datiolabs_core::models::Categoria { id: format!("cat-{}", uuid::Uuid::new_v4().to_string()[..8].to_string()), nombre };
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.guardar_categoria(&cat).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let cats = db.listar_categorias().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db); let _ = state.tx.send(());
+    Ok(Json(cats))
+}
+async fn api_categorias_eliminar(State(state): State<AxumAppState>, Path(id): Path<String>) -> Result<Json<Vec<datiolabs_core::models::Categoria>>, StatusCode> {
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.eliminar_categoria(&id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let cats = db.listar_categorias().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db); let _ = state.tx.send(());
+    Ok(Json(cats))
+}
+
+// CRUD tasas impuestos
+async fn api_tasas_impuestos_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::TasaImpuesto>>, StatusCode> {
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(db.listar_tasas_impuestos().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?))
+}
+async fn api_tasas_impuestos_crear(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, serde_json::Value>>) -> Result<Json<Vec<datiolabs_core::models::TasaImpuesto>>, StatusCode> {
+    let nombre = body.get("nombre").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let porcentaje = body.get("porcentaje").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let t = datiolabs_core::models::TasaImpuesto { id: format!("ti-{}", uuid::Uuid::new_v4().to_string()[..8].to_string()), nombre, porcentaje: rust_decimal::Decimal::try_from(porcentaje).unwrap_or(rust_decimal::Decimal::ZERO) };
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.guardar_tasa_impuesto(&t).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let result = db.listar_tasas_impuestos().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db); let _ = state.tx.send(());
+    Ok(Json(result))
+}
+async fn api_tasas_impuestos_eliminar(State(state): State<AxumAppState>, Path(id): Path<String>) -> Result<Json<Vec<datiolabs_core::models::TasaImpuesto>>, StatusCode> {
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.eliminar_tasa_impuesto(&id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let result = db.listar_tasas_impuestos().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db); let _ = state.tx.send(());
+    Ok(Json(result))
+}
+
+// CRUD metodos pago
+async fn api_metodos_pago_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::MetodoPagoConfig>>, StatusCode> {
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(db.listar_metodos_pago().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?))
+}
+async fn api_metodos_pago_crear(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<Vec<datiolabs_core::models::MetodoPagoConfig>>, StatusCode> {
+    let nombre = body.get("nombre").cloned().unwrap_or_default().to_uppercase();
+    let moneda = body.get("moneda").cloned().unwrap_or_else(|| "BS".to_string());
+    let m = datiolabs_core::models::MetodoPagoConfig { nombre, moneda };
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.guardar_metodo_pago(&m).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let result = db.listar_metodos_pago().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db); let _ = state.tx.send(());
+    Ok(Json(result))
+}
+async fn api_metodos_pago_eliminar(State(state): State<AxumAppState>, Path(nombre): Path<String>) -> Result<Json<Vec<datiolabs_core::models::MetodoPagoConfig>>, StatusCode> {
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.eliminar_metodo_pago(&nombre).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let result = db.listar_metodos_pago().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db); let _ = state.tx.send(());
+    Ok(Json(result))
+}
+
+// CRUD operadores
+async fn api_operadores_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::Operador>>, StatusCode> {
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(db.listar_operadores().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?))
+}
+async fn api_operadores_crear(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<Vec<datiolabs_core::models::Operador>>, StatusCode> {
+    let nombre = body.get("nombre").cloned().unwrap_or_default();
+    let op = datiolabs_core::models::Operador { id: format!("op-{}", uuid::Uuid::new_v4().to_string()[..8].to_string()), nombre, activo: true, creado_unix: ahora_unix() };
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.guardar_operador(&op).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let result = db.listar_operadores().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db); let _ = state.tx.send(());
+    Ok(Json(result))
+}
+async fn api_operadores_editar(State(state): State<AxumAppState>, Path(id): Path<String>, Json(body): Json<HashMap<String, String>>) -> Result<Json<Vec<datiolabs_core::models::Operador>>, StatusCode> {
+    let nombre = body.get("nombre").cloned().unwrap_or_default();
+    let mut ops = { let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?; db.listar_operadores().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? };
+    if let Some(op) = ops.iter_mut().find(|o| o.id == id) { op.nombre = nombre; }
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    for op in &ops { db.guardar_operador(op).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?; }
+    let result = db.listar_operadores().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db); let _ = state.tx.send(());
+    Ok(Json(result))
+}
+async fn api_operadores_eliminar(State(state): State<AxumAppState>, Path(id): Path<String>) -> Result<Json<Vec<datiolabs_core::models::Operador>>, StatusCode> {
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.eliminar_operador(&id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let result = db.listar_operadores().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db); let _ = state.tx.send(());
+    Ok(Json(result))
+}
+async fn api_operadores_alternar(State(state): State<AxumAppState>, Path(id): Path<String>) -> Result<Json<Vec<datiolabs_core::models::Operador>>, StatusCode> {
+    let mut ops = { let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?; db.listar_operadores().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? };
+    if let Some(op) = ops.iter_mut().find(|o| o.id == id) { op.activo = !op.activo; }
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    for op in &ops { db.guardar_operador(op).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?; }
+    let result = db.listar_operadores().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db); let _ = state.tx.send(());
+    Ok(Json(result))
+}
+
+// Jornadas
+async fn api_jornada_actual(State(state): State<AxumAppState>) -> Result<Json<Option<datiolabs_core::models::Jornada>>, StatusCode> {
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(db.jornada_actual().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?))
+}
+async fn api_jornadas_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::Jornada>>, StatusCode> {
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(db.listar_jornadas(50).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?))
+}
+async fn api_jornadas_abrir(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, serde_json::Value>>) -> Result<Json<serde_json::Value>, StatusCode> {
+    let operador = body.get("operador").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let tasa = state.servicio_tasa.info_actual().valor;
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if db.jornada_actual().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.is_some() {
+        return Err(StatusCode::CONFLICT);
+    }
+    let jornada = datiolabs_core::models::Jornada {
+        id: format!("JOR-{}-01", chrono::Utc::now().format("%Y%m%d")),
+        estado: "abierta".to_string(), inicio_unix: ahora_unix(), fin_unix: None,
+        operador_inicial: operador.clone(), operador_actual: operador,
+        operadores_activos: Vec::new(), operadores_relevo: Vec::new(),
+        tasa_inicio: tasa, tasa_fin: None,
+        ventas_total_usd: rust_decimal::Decimal::ZERO, ventas_total_bs: rust_decimal::Decimal::ZERO,
+        tickets_emitidos: 0, vuelto_pagado_bs: rust_decimal::Decimal::ZERO,
+        vuelto_retenido_bs: rust_decimal::Decimal::ZERO, deudas_liquidadas_usd: rust_decimal::Decimal::ZERO,
+        entradas_stock_reg: 0, mermas_stock_reg: 0, cambios_precio_reg: 0, checksum_sha256: None,
+    };
+    db.guardar_jornada(&jornada).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db); let _ = state.tx.send(());
+    Ok(Json(serde_json::to_value(jornada).unwrap_or(serde_json::json!({}))))
+}
+async fn api_jornadas_cerrar(State(state): State<AxumAppState>) -> Result<Json<serde_json::Value>, StatusCode> {
+    let tasa = state.servicio_tasa.info_actual().valor;
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut jornada = db.jornada_actual().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    jornada.estado = "cerrada".to_string();
+    jornada.fin_unix = Some(ahora_unix());
+    jornada.tasa_fin = Some(tasa);
+    let checksum = format!("{:x}", sha2::Sha256::digest(jornada.id.as_bytes()));
+    jornada.checksum_sha256 = Some(checksum);
+    db.guardar_jornada(&jornada).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db); let _ = state.tx.send(());
+    Ok(Json(serde_json::to_value(jornada).unwrap_or(serde_json::json!({}))))
+}
+async fn api_jornadas_asignar(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, serde_json::Value>>) -> Result<Json<serde_json::Value>, StatusCode> {
+    let ops: Vec<String> = body.get("operadores").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut jornada = db.jornada_actual().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.ok_or(StatusCode::NOT_FOUND)?;
+    jornada.operadores_activos = ops.clone();
+    for op in &ops { if !jornada.operadores_relevo.contains(op) { jornada.operadores_relevo.push(op.clone()); } }
+    db.guardar_jornada(&jornada).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db); let _ = state.tx.send(());
+    Ok(Json(serde_json::to_value(jornada).unwrap_or(serde_json::json!({}))))
+}
+async fn api_jornadas_relevar(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<serde_json::Value>, StatusCode> {
+    let operador = body.get("operador").cloned().unwrap_or_default();
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut jornada = db.jornada_actual().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.ok_or(StatusCode::NOT_FOUND)?;
+    jornada.operador_actual = operador.clone();
+    jornada.operadores_activos = vec![operador.clone()];
+    if !jornada.operadores_relevo.contains(&operador) { jornada.operadores_relevo.push(operador); }
+    db.guardar_jornada(&jornada).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db); let _ = state.tx.send(());
+    Ok(Json(serde_json::to_value(jornada).unwrap_or(serde_json::json!({}))))
+}
+
+// Dispositivos
+async fn api_dispositivos_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::DispositivoRemoto>>, StatusCode> {
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(db.listar_dispositivos().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?))
+}
+async fn api_dispositivos_registrar(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<Vec<datiolabs_core::models::DispositivoRemoto>>, StatusCode> {
+    let nombre = body.get("nombre").cloned().unwrap_or_default();
+    let d = datiolabs_core::models::DispositivoRemoto { id: format!("dev-{}", uuid::Uuid::new_v4().to_string()[..8].to_string()), nombre, ip: String::new(), ultimo_acceso: String::new(), activo: true };
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.guardar_dispositivo(&d).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let result = db.listar_dispositivos().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db); let _ = state.tx.send(());
+    Ok(Json(result))
+}
+async fn api_dispositivos_revocar(State(state): State<AxumAppState>, Path(id): Path<String>) -> Result<Json<Vec<datiolabs_core::models::DispositivoRemoto>>, StatusCode> {
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.eliminar_dispositivo(&id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let result = db.listar_dispositivos().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db); let _ = state.tx.send(());
+    Ok(Json(result))
+}
+
+// Semaforo
+async fn api_semaforo_obtener(State(state): State<AxumAppState>) -> Result<Json<serde_json::Value>, StatusCode> {
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let s = db.cargar_semaforo().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(s.map(|v| serde_json::json!({ "rojoMax": v.rojo_max, "amarilloMax": v.amarillo_max })).unwrap_or(serde_json::json!({ "rojoMax": 5, "amarilloMax": 15 }))))
+}
+async fn api_semaforo_guardar(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, serde_json::Value>>) -> Result<Json<serde_json::Value>, StatusCode> {
+    let rojo = body.get("rojoMax").and_then(|v| v.as_u64()).unwrap_or(5) as u32;
+    let amarillo = body.get("amarilloMax").and_then(|v| v.as_u64()).unwrap_or(15) as u32;
+    let s = datiolabs_core::models::SemaforoStock { rojo_max: rojo, amarillo_max: amarillo };
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.guardar_semaforo(&s).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db); let _ = state.tx.send(());
+    Ok(Json(serde_json::json!({ "rojoMax": rojo, "amarilloMax": amarillo })))
+}
+
+// PIN
+async fn api_pin_cambiar(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<serde_json::Value>, StatusCode> {
+    let pin_anterior = body.get("pinAnterior").cloned().unwrap_or_default();
+    let pin_nuevo = body.get("pinNuevo").cloned().unwrap_or_default();
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut cfg = db.cargar_config().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.ok_or(StatusCode::NOT_FOUND)?;
+    if !cfg.pin_dueno_sha256.is_empty() {
+        let hash = format!("{:x}", sha2::Sha256::digest(pin_anterior.as_bytes()));
+        if cfg.pin_dueno_sha256 != hash { return Err(StatusCode::FORBIDDEN); }
+    }
+    cfg.pin_dueno_sha256 = if pin_nuevo.trim().is_empty() { String::new() } else { format!("{:x}", sha2::Sha256::digest(pin_nuevo.as_bytes())) };
+    db.actualizar_config(&cfg).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(db); let _ = state.tx.send(());
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+// Respaldos
+async fn api_respaldos_listar(State(_state): State<AxumAppState>) -> Result<Json<Vec<serde_json::Value>>, StatusCode> {
+    Ok(Json(serde_json::json!([])))
+}
+async fn api_respaldos_crear(State(state): State<AxumAppState>) -> Result<Json<serde_json::Value>, StatusCode> {
+    let _ = state.tx.send(());
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+async fn api_respaldos_restaurar(State(state): State<AxumAppState>, Json(_body): Json<HashMap<String, String>>) -> Result<Json<serde_json::Value>, StatusCode> {
+    let _ = state.tx.send(());
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+// Historico tasas
+async fn api_historico_tasas(State(state): State<AxumAppState>) -> Result<Json<Vec<serde_json::Value>>, StatusCode> {
+    let db = state.ledger.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let tasas = db.ultimas_tasas(50).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let result: Vec<serde_json::Value> = tasas.iter().enumerate().map(|(i, t)| {
+        serde_json::json!({ "id": format!("tasa-{}", i), "valor": t.valor_bs_por_usd.to_string(), "tipo": "automatico" })
+    }).collect();
+    Ok(Json(result))
+}
+
 #[derive(Clone)]
 struct AppState {
     ledger: Arc<Mutex<Ledger>>,
     servicio_tasa: Arc<ServicioTasa>,
     session_store: SessionStore,
+    tx: broadcast::Sender<()>,
 }
 
 fn ahora_unix() -> i64 {
@@ -568,6 +1104,10 @@ where
     operacion(&guardia).map_err(Into::into)
 }
 
+fn notificar_panel(estado: &AppState) {
+    let _ = estado.tx.send(());
+}
+
 // ---------------- DTOs (contrato camelCase con el frontend) ----------------
 
 #[derive(Serialize)]
@@ -601,6 +1141,20 @@ struct ProductoDto {
     impuesto_pct: Decimal,
     stock: Decimal,
     capacidades: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    categoria_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    precio_bruto_usd: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    margen_pct: Option<Decimal>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    sin_stock: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unidad: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    es_caja: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unidades_por_caja: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -675,6 +1229,16 @@ struct CuentaDto {
     lineas: usize,
     total_parcial_usd: Decimal,
     total_parcial_bs: Decimal,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    abonos_usd: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    abonos_bs: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tipo: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cliente: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    nota: Option<String>,
 }
 
 #[derive(Clone, Copy, Serialize)]
@@ -923,6 +1487,13 @@ fn crear_producto(estado: tauri::State<AppState>, input: ProductoInput) -> Resul
         impuesto_pct: decimal_de(&input.impuesto_pct)?,
         stock: decimal_de(&input.stock_inicial)?,
         capacidades: caps,
+        categoria_id: input.categoria_id.clone(),
+        precio_bruto_usd: input.precio_bruto_usd.as_deref().and_then(|s| decimal_de(s).ok()),
+        margen_pct: input.margen_pct.as_deref().and_then(|s| decimal_de(s).ok()),
+        sin_stock: input.sin_stock.unwrap_or(false),
+        unidad: input.unidad.clone(),
+        es_caja: input.es_caja.unwrap_or(false),
+        unidades_por_caja: input.unidades_por_caja,
     };
     if producto.sku.as_str().is_empty()
         || producto.nombre.as_str().is_empty()
@@ -935,21 +1506,32 @@ fn crear_producto(estado: tauri::State<AppState>, input: ProductoInput) -> Resul
         ));
     }
     con_ledger(&estado, |db| db.guardar_producto(&producto))?;
+    notificar_panel(&estado);
     Ok(())
 }
 
 #[tauri::command]
 fn listar_productos(estado: tauri::State<AppState>) -> Result<Vec<ProductoDto>, UIError> {
     config_requerida(&estado)?;
-    let catalogo = con_ledger(&estado, catalogo_fresco)?;
-    let filas = (0..catalogo.len())
-        .map(|i| ProductoDto {
-            sku: catalogo.sku_obj(i),
-            nombre: catalogo.nombre_obj(i),
-            precio_usd: catalogo.precio_usd(i),
-            impuesto_pct: catalogo.impuesto_pct(i),
-            stock: catalogo.stock(i),
-            capacidades: catalogo.capacidades(i),
+    let db = estado.ledger.lock().map_err(|_| UIError::new("db bloqueada", ""))?;
+    let tree = db.inner_db().open_tree("productos").map_err(|e| UIError::new("error db", &e.to_string()))?;
+    let filas: Vec<ProductoDto> = tree.iter()
+        .filter_map(|r| r.ok())
+        .filter_map(|(_, v)| bincode::deserialize::<Producto>(&v).ok())
+        .map(|p| ProductoDto {
+            sku: p.sku,
+            nombre: p.nombre,
+            precio_usd: p.precio_usd,
+            impuesto_pct: p.impuesto_pct,
+            stock: p.stock,
+            capacidades: p.capacidades,
+            categoria_id: p.categoria_id,
+            precio_bruto_usd: p.precio_bruto_usd,
+            margen_pct: p.margen_pct,
+            sin_stock: p.sin_stock,
+            unidad: p.unidad,
+            es_caja: p.es_caja,
+            unidades_por_caja: p.unidades_por_caja,
         })
         .collect();
     Ok(filas)
@@ -980,6 +1562,7 @@ fn compra_stock(
             .ok_or(DbError::Negocio(ErrorNegocio::ProductoInexistente))?;
         Ok(cat.stock(idx))
     })?;
+    notificar_panel(&estado);
     Ok(nuevo_stock)
 }
 
@@ -1015,6 +1598,7 @@ fn registrar_merma(
             .ok_or(DbError::Negocio(ErrorNegocio::ProductoInexistente))?;
         Ok(cat.stock(idx))
     })?;
+    notificar_panel(&estado);
     Ok(nuevo_stock)
 }
 
@@ -1159,11 +1743,18 @@ fn registrar_venta(
             fecha_apertura_unix: ahora_unix(),
             fecha_cierre_unix: ahora_unix(),
             firma_sha256: String::new(),
+            tipo: "venta".to_string(),
+            cliente: None,
+            nota: None,
+            abonos_usd: None,
+            abonos_bs: None,
         };
         let firmada = db.guardar_venta(venta)?;
 
         Ok(armar_ticket(&firmada, recibido, vuelto))
-    })
+    });
+    notificar_panel(&estado);
+    resultado
 }
 
 fn armar_ticket(venta: &Venta, recibido: Decimal, vuelto: Decimal) -> TicketDto {
@@ -1223,7 +1814,13 @@ fn armar_ticket(venta: &Venta, recibido: Decimal, vuelto: Decimal) -> TicketDto 
 // ---------------- comandos: cuenta abierta (licoreria) ----------------
 
 #[tauri::command]
-fn abrir_cuenta(estado: tauri::State<AppState>, etiqueta: String) -> Result<CuentaDto, UIError> {
+fn abrir_cuenta(
+    estado: tauri::State<AppState>,
+    etiqueta: String,
+    tipo: Option<String>,
+    cliente: Option<String>,
+    nota: Option<String>,
+) -> Result<CuentaDto, UIError> {
     let cfg = config_requerida(&estado)?;
     let permitidas = capacidades_de_rubros(cfg.rubros);
     if !licoreria::admite_cuenta_abierta(permitidas) {
@@ -1256,8 +1853,14 @@ fn abrir_cuenta(estado: tauri::State<AppState>, etiqueta: String) -> Result<Cuen
         fecha_apertura_unix: ahora_unix(),
         fecha_cierre_unix: 0,
         firma_sha256: String::new(),
+        tipo: tipo.unwrap_or_else(|| "activa".to_string()),
+        cliente,
+        nota,
+        abonos_usd: Some(Decimal::ZERO),
+        abonos_bs: Some(Decimal::ZERO),
     };
     let guardada = con_ledger(&estado, |db| db.guardar_venta(venta))?;
+    notificar_panel(&estado);
     Ok(cuenta_dto(&guardada))
 }
 
@@ -1268,6 +1871,11 @@ fn cuenta_dto(v: &Venta) -> CuentaDto {
         lineas: v.lineas.skus.len(),
         total_parcial_usd: v.lineas.total_usd(),
         total_parcial_bs: v.lineas.total_bs(),
+        abonos_usd: v.abonos_usd,
+        abonos_bs: v.abonos_bs,
+        tipo: Some(v.tipo.clone()),
+        cliente: v.cliente.clone(),
+        nota: v.nota.clone(),
     }
 }
 
@@ -1315,6 +1923,7 @@ fn agregar_consumo(
         descontar_con_lotes_interno(db, &catalogo, idx, cant, &venta.id)?;
         db.guardar_venta(venta)
     })?;
+    notificar_panel(&estado);
     Ok(cuenta_dto(&actualizada))
 }
 
@@ -1392,6 +2001,7 @@ fn cerrar_cuenta(
         venta.fecha_cierre_unix = ahora_unix();
         db.guardar_venta(venta)
     })?;
+    notificar_panel(&estado);
 
     Ok(armar_ticket(
         &cerrada,
@@ -1535,7 +2145,9 @@ fn obtener_tasa_pendiente(state: tauri::State<AppState>) -> Result<Option<TasaIn
 
 #[tauri::command]
 fn aplicar_tasa_pendiente(state: tauri::State<AppState>) -> Result<TasaInfo, UIError> {
-    state.servicio_tasa.aplicar_tasa_pendiente()
+    let resultado = state.servicio_tasa.aplicar_tasa_pendiente();
+    notificar_panel(&state);
+    resultado
 }
 
 #[tauri::command]
@@ -1545,7 +2157,21 @@ fn establecer_tasa_manual(
 ) -> Result<TasaInfo, UIError> {
     let valor = Decimal::from_str(&valor.trim().replace(',', "."))
         .map_err(|_| UIError::new("tasa inválida", "Formato decimal inválido"))?;
-    state.servicio_tasa.establecer_tasa_manual(valor)
+    let resultado = state.servicio_tasa.establecer_tasa_manual(valor);
+    notificar_panel(&state);
+    resultado
+}
+
+#[tauri::command]
+fn fijar_tasa_manual(
+    state: tauri::State<AppState>,
+    tasa: String,
+) -> Result<TasaInfo, UIError> {
+    let valor = Decimal::from_str(&tasa.trim().replace(',', "."))
+        .map_err(|_| UIError::new("tasa invalida", "Formato decimal invalido"))?;
+    let resultado = state.servicio_tasa.establecer_tasa_manual(valor);
+    notificar_panel(&state);
+    resultado
 }
 
 #[tauri::command]
@@ -1632,7 +2258,7 @@ fn generar_qr_panel(_state: tauri::State<AppState>) -> Result<QrData, UIError> {
         .render::<image::Luma<u8>>()
         .min_dimensions(256, 256)
         .dark_color(image::Luma([0x0f]))
-        .light_color(image::Luma([0x1e]))
+        .light_color(image::Luma([0xff]))
         .build();
 
     let mut png_bytes = Vec::new();
@@ -1789,6 +2415,605 @@ fn get_backup_dir() -> Result<String, UIError> {
     Ok(dir.to_string_lossy().to_string())
 }
 
+// ---------------- comandos: categorias ----------------
+
+#[tauri::command]
+fn listar_categorias(estado: tauri::State<AppState>) -> Result<Vec<Categoria>, UIError> {
+    config_requerida(&estado)?;
+    Ok(con_ledger(&estado, |db| db.listar_categorias())?)
+}
+
+#[tauri::command]
+fn crear_categoria(estado: tauri::State<AppState>, nombre: String) -> Result<Vec<Categoria>, UIError> {
+    config_requerida(&estado)?;
+    let nombre = nombre.trim().to_string();
+    if nombre.is_empty() || nombre.len() > 32 {
+        return Err(UIError::new("nombre invalido", "1-32 caracteres"));
+    }
+    let cat = Categoria {
+        id: format!("cat-{}", Uuid::new_v4().to_string()[..8].to_string()),
+        nombre,
+    };
+    con_ledger(&estado, |db| db.guardar_categoria(&cat))?;
+    notificar_panel(&estado);
+    Ok(con_ledger(&estado, |db| db.listar_categorias())?)
+}
+
+#[tauri::command]
+fn eliminar_categoria(estado: tauri::State<AppState>, id: String) -> Result<Vec<Categoria>, UIError> {
+    config_requerida(&estado)?;
+    con_ledger(&estado, |db| db.eliminar_categoria(&id))?;
+    notificar_panel(&estado);
+    Ok(con_ledger(&estado, |db| db.listar_categorias())?)
+}
+
+// ---------------- comandos: tasas impuestos ----------------
+
+#[tauri::command]
+fn listar_tasas_impuestos(estado: tauri::State<AppState>) -> Result<Vec<TasaImpuesto>, UIError> {
+    config_requerida(&estado)?;
+    Ok(con_ledger(&estado, |db| db.listar_tasas_impuestos())?)
+}
+
+#[tauri::command]
+fn crear_tasa_impuesto(
+    estado: tauri::State<AppState>,
+    nombre: String,
+    porcentaje: f64,
+) -> Result<Vec<TasaImpuesto>, UIError> {
+    config_requerida(&estado)?;
+    let nombre = nombre.trim().to_string();
+    if nombre.is_empty() || nombre.len() > 32 {
+        return Err(UIError::new("nombre invalido", "1-32 caracteres"));
+    }
+    if porcentaje < 0.0 || porcentaje > 100.0 {
+        return Err(UIError::new("porcentaje invalido", "0-100"));
+    }
+    let t = TasaImpuesto {
+        id: format!("ti-{}", Uuid::new_v4().to_string()[..8].to_string()),
+        nombre,
+        porcentaje: Decimal::try_from(porcentaje).unwrap_or(Decimal::ZERO),
+    };
+    con_ledger(&estado, |db| db.guardar_tasa_impuesto(&t))?;
+    notificar_panel(&estado);
+    Ok(con_ledger(&estado, |db| db.listar_tasas_impuestos())?)
+}
+
+#[tauri::command]
+fn eliminar_tasa_impuesto(estado: tauri::State<AppState>, id: String) -> Result<Vec<TasaImpuesto>, UIError> {
+    config_requerida(&estado)?;
+    con_ledger(&estado, |db| db.eliminar_tasa_impuesto(&id))?;
+    notificar_panel(&estado);
+    Ok(con_ledger(&estado, |db| db.listar_tasas_impuestos())?)
+}
+
+// ---------------- comandos: metodos de pago ----------------
+
+#[tauri::command]
+fn listar_metodos_pago(estado: tauri::State<AppState>) -> Result<Vec<MetodoPagoConfig>, UIError> {
+    config_requerida(&estado)?;
+    Ok(con_ledger(&estado, |db| db.listar_metodos_pago())?)
+}
+
+#[tauri::command]
+fn crear_metodo_pago(
+    estado: tauri::State<AppState>,
+    nombre: String,
+    moneda: String,
+) -> Result<Vec<MetodoPagoConfig>, UIError> {
+    config_requerida(&estado)?;
+    let nombre = nombre.trim().to_uppercase().to_string();
+    if nombre.is_empty() || nombre.len() > 25 {
+        return Err(UIError::new("nombre invalido", "1-25 caracteres, solo alfanumerico"));
+    }
+    if moneda != "USD" && moneda != "BS" {
+        return Err(UIError::new("moneda invalida", "USD o BS"));
+    }
+    let m = MetodoPagoConfig { nombre, moneda };
+    con_ledger(&estado, |db| db.guardar_metodo_pago(&m))?;
+    notificar_panel(&estado);
+    Ok(con_ledger(&estado, |db| db.listar_metodos_pago())?)
+}
+
+#[tauri::command]
+fn eliminar_metodo_pago(estado: tauri::State<AppState>, nombre: String) -> Result<Vec<MetodoPagoConfig>, UIError> {
+    config_requerida(&estado)?;
+    let metodos = con_ledger(&estado, |db| db.listar_metodos_pago())?;
+    if metodos.len() <= 1 {
+        return Err(UIError::new("no permitido", "Debe existir al menos un metodo de pago"));
+    }
+    con_ledger(&estado, |db| db.eliminar_metodo_pago(&nombre))?;
+    notificar_panel(&estado);
+    Ok(con_ledger(&estado, |db| db.listar_metodos_pago())?)
+}
+
+// ---------------- comandos: operadores ----------------
+
+#[tauri::command]
+fn listar_operadores(estado: tauri::State<AppState>) -> Result<Vec<Operador>, UIError> {
+    config_requerida(&estado)?;
+    Ok(con_ledger(&estado, |db| db.listar_operadores())?)
+}
+
+#[tauri::command]
+fn crear_operador(estado: tauri::State<AppState>, nombre: String) -> Result<Vec<Operador>, UIError> {
+    config_requerida(&estado)?;
+    let nombre = nombre.trim().to_string();
+    if nombre.is_empty() || nombre.len() > 30 {
+        return Err(UIError::new("nombre invalido", "1-30 caracteres"));
+    }
+    let op = Operador {
+        id: format!("op-{}", Uuid::new_v4().to_string()[..8].to_string()),
+        nombre,
+        activo: true,
+        creado_unix: ahora_unix(),
+    };
+    con_ledger(&estado, |db| db.guardar_operador(&op))?;
+    notificar_panel(&estado);
+    Ok(con_ledger(&estado, |db| db.listar_operadores())?)
+}
+
+#[tauri::command]
+fn editar_operador(estado: tauri::State<AppState>, id: String, nombre: String) -> Result<Vec<Operador>, UIError> {
+    config_requerida(&estado)?;
+    let nombre = nombre.trim().to_string();
+    if nombre.is_empty() || nombre.len() > 30 {
+        return Err(UIError::new("nombre invalido", "1-30 caracteres"));
+    }
+    let mut ops = con_ledger(&estado, |db| db.listar_operadores())?;
+    if let Some(op) = ops.iter_mut().find(|o| o.id == id) {
+        op.nombre = nombre;
+        con_ledger(&estado, |db| db.guardar_operador(op))?;
+    }
+    notificar_panel(&estado);
+    Ok(con_ledger(&estado, |db| db.listar_operadores())?)
+}
+
+#[tauri::command]
+fn eliminar_operador(estado: tauri::State<AppState>, id: String) -> Result<Vec<Operador>, UIError> {
+    config_requerida(&estado)?;
+    con_ledger(&estado, |db| db.eliminar_operador(&id))?;
+    notificar_panel(&estado);
+    Ok(con_ledger(&estado, |db| db.listar_operadores())?)
+}
+
+#[tauri::command]
+fn alternar_operador(estado: tauri::State<AppState>, id: String) -> Result<Vec<Operador>, UIError> {
+    config_requerida(&estado)?;
+    let mut ops = con_ledger(&estado, |db| db.listar_operadores())?;
+    if let Some(op) = ops.iter_mut().find(|o| o.id == id) {
+        op.activo = !op.activo;
+        con_ledger(&estado, |db| db.guardar_operador(op))?;
+    }
+    notificar_panel(&estado);
+    Ok(con_ledger(&estado, |db| db.listar_operadores())?)
+}
+
+// ---------------- comandos: dispositivos ----------------
+
+#[tauri::command]
+fn listar_dispositivos(estado: tauri::State<AppState>) -> Result<Vec<DispositivoRemoto>, UIError> {
+    config_requerida(&estado)?;
+    Ok(con_ledger(&estado, |db| db.listar_dispositivos())?)
+}
+
+#[tauri::command]
+fn registrar_dispositivo(estado: tauri::State<AppState>, nombre: String) -> Result<Vec<DispositivoRemoto>, UIError> {
+    config_requerida(&estado)?;
+    let d = DispositivoRemoto {
+        id: format!("dev-{}", Uuid::new_v4().to_string()[..8].to_string()),
+        nombre,
+        ip: String::new(),
+        ultimo_acceso: String::new(),
+        activo: true,
+    };
+    con_ledger(&estado, |db| db.guardar_dispositivo(&d))?;
+    notificar_panel(&estado);
+    Ok(con_ledger(&estado, |db| db.listar_dispositivos())?)
+}
+
+#[tauri::command]
+fn revocar_dispositivo(estado: tauri::State<AppState>, id: String) -> Result<Vec<DispositivoRemoto>, UIError> {
+    config_requerida(&estado)?;
+    con_ledger(&estado, |db| db.eliminar_dispositivo(&id))?;
+    notificar_panel(&estado);
+    Ok(con_ledger(&estado, |db| db.listar_dispositivos())?)
+}
+
+// ---------------- comandos: semaforo stock ----------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SemaforoDto {
+    rojo_max: u32,
+    amarillo_max: u32,
+}
+
+#[tauri::command]
+fn obtener_semaforo_stock(estado: tauri::State<AppState>) -> Result<SemaforoDto, UIError> {
+    config_requerida(&estado)?;
+    let s = con_ledger(&estado, |db| db.cargar_semaforo())?;
+    Ok(s.map(|v| SemaforoDto { rojo_max: v.rojo_max, amarillo_max: v.amarillo_max })
+       .unwrap_or(SemaforoDto { rojo_max: 5, amarillo_max: 15 }))
+}
+
+#[tauri::command]
+fn guardar_semaforo_stock(
+    estado: tauri::State<AppState>,
+    rojo_max: u32,
+    amarillo_max: u32,
+) -> Result<SemaforoDto, UIError> {
+    config_requerida(&estado)?;
+    if rojo_max < 1 || amarillo_max <= rojo_max {
+        return Err(UIError::new("valores invalidos", "Rojo >= 1, amarillo > rojo"));
+    }
+    let s = SemaforoStock { rojo_max, amarillo_max };
+    con_ledger(&estado, |db| db.guardar_semaforo(&s))?;
+    notificar_panel(&estado);
+    Ok(SemaforoDto { rojo_max, amarillo_max })
+}
+
+// ---------------- comandos: cambiar PIN ----------------
+
+#[tauri::command]
+fn cambiar_pin_dueno(
+    estado: tauri::State<AppState>,
+    pin_anterior: String,
+    pin_nuevo: String,
+) -> Result<bool, UIError> {
+    config_requerida(&estado)?;
+    let mut cfg = con_ledger(&estado, |db| db.cargar_config())?
+        .ok_or_else(|| UIError::new("negocio sin inicializar", "Ejecute el asistente"))?;
+    if !cfg.pin_dueno_sha256.is_empty() {
+        if cfg.pin_dueno_sha256 != hash_pin(&pin_anterior) {
+            return Err(UIError::new("pin incorrecto", "La clave anterior no coincide"));
+        }
+    }
+    cfg.pin_dueno_sha256 = if pin_nuevo.trim().is_empty() {
+        String::new()
+    } else {
+        hash_pin(&pin_nuevo)
+    };
+    con_ledger(&estado, |db| db.actualizar_config(&cfg))?;
+    notificar_panel(&estado);
+    Ok(true)
+}
+
+// ---------------- comandos: eliminar producto ----------------
+
+#[tauri::command]
+fn eliminar_producto(estado: tauri::State<AppState>, sku: String) -> Result<(), UIError> {
+    config_requerida(&estado)?;
+    let sku_norm = sku.trim().to_uppercase();
+    let db = estado.ledger.lock().map_err(|_| UIError::new("db bloqueada", ""))?;
+    let tree = db.inner_db().open_tree("productos").map_err(|e| UIError::new("error db", &e.to_string()))?;
+    tree.remove(sku_norm.as_bytes()).map_err(|e| UIError::new("error eliminando", &e.to_string()))?;
+    drop(db);
+    notificar_panel(&estado);
+    Ok(())
+}
+
+// ---------------- comandos: reducir stock ----------------
+
+#[tauri::command]
+fn reducir_stock(
+    estado: tauri::State<AppState>,
+    sku: String,
+    cantidad: String,
+) -> Result<Decimal, UIError> {
+    config_requerida(&estado)?;
+    let cant = decimal_de(&cantidad)?;
+    if cant <= Decimal::ZERO {
+        return Err(UIError::new("cantidad invalida", "Debe ser mayor a cero"));
+    }
+    let mov = movimiento(
+        sku.trim().to_uppercase().as_str(),
+        -cant,
+        MotivoMovimiento::Ajuste,
+        None,
+    );
+    let nuevo_stock = con_ledger(&estado, |db| -> Result<Decimal, DbError> {
+        db.aplicar_movimiento(mov, |_, _| {})?;
+        let cat = db.cargar_catalogo()?;
+        let idx = cat
+            .indice_de(sku.trim().to_uppercase().as_str())
+            .ok_or(DbError::Negocio(ErrorNegocio::ProductoInexistente))?;
+        Ok(cat.stock(idx))
+    })?;
+    notificar_panel(&estado);
+    Ok(nuevo_stock)
+}
+
+// ---------------- comandos: jornada ----------------
+
+#[tauri::command]
+fn obtener_jornada_actual(estado: tauri::State<AppState>) -> Result<Option<Jornada>, UIError> {
+    config_requerida(&estado)?;
+    Ok(con_ledger(&estado, |db| db.jornada_actual())?)
+}
+
+#[tauri::command]
+fn listar_historico_jornadas(estado: tauri::State<AppState>) -> Result<Vec<Jornada>, UIError> {
+    config_requerida(&estado)?;
+    Ok(con_ledger(&estado, |db| db.listar_jornadas(50))?)
+}
+
+#[tauri::command]
+fn abrir_jornada(
+    estado: tauri::State<AppState>,
+    operador: String,
+    operadores: Option<Vec<String>>,
+) -> Result<Jornada, UIError> {
+    config_requerida(&estado)?;
+    let tasa = tasa_viva(&estado)?;
+    let actual = con_ledger(&estado, |db| db.jornada_actual())?;
+    if actual.is_some() {
+        return Err(UIError::new("jornada abierta", "Ya existe una jornada laboral abierta"));
+    }
+    let ops = operadores.unwrap_or_default();
+    let jornada = Jornada {
+        id: format!("JOR-{}-01", chrono::Utc::now().format("%Y%m%d")),
+        estado: "abierta".to_string(),
+        inicio_unix: ahora_unix(),
+        fin_unix: None,
+        operador_inicial: operador.clone(),
+        operador_actual: operador,
+        operadores_activos: ops.clone(),
+        operadores_relevo: ops,
+        tasa_inicio: tasa,
+        tasa_fin: None,
+        ventas_total_usd: Decimal::ZERO,
+        ventas_total_bs: Decimal::ZERO,
+        tickets_emitidos: 0,
+        vuelto_pagado_bs: Decimal::ZERO,
+        vuelto_retenido_bs: Decimal::ZERO,
+        deudas_liquidadas_usd: Decimal::ZERO,
+        entradas_stock_reg: 0,
+        mermas_stock_reg: 0,
+        cambios_precio_reg: 0,
+        checksum_sha256: None,
+    };
+    con_ledger(&estado, |db| db.guardar_jornada(&jornada))?;
+    notificar_panel(&estado);
+    Ok(jornada)
+}
+
+#[tauri::command]
+fn asignar_operadores_turno(
+    estado: tauri::State<AppState>,
+    operadores: Vec<String>,
+) -> Result<Jornada, UIError> {
+    config_requerida(&estado)?;
+    let mut jornada = con_ledger(&estado, |db| db.jornada_actual())?
+        .ok_or_else(|| UIError::new("sin jornada", "No hay jornada abierta"))?;
+    jornada.operadores_activos = operadores.clone();
+    for op in &operadores {
+        if !jornada.operadores_relevo.contains(op) {
+            jornada.operadores_relevo.push(op.clone());
+        }
+    }
+    con_ledger(&estado, |db| db.guardar_jornada(&jornada))?;
+    notificar_panel(&estado);
+    Ok(jornada)
+}
+
+#[tauri::command]
+fn relevar_operador_jornada(
+    estado: tauri::State<AppState>,
+    operador: String,
+) -> Result<Jornada, UIError> {
+    config_requerida(&estado)?;
+    let mut jornada = con_ledger(&estado, |db| db.jornada_actual())?
+        .ok_or_else(|| UIError::new("sin jornada", "No hay jornada abierta"))?;
+    jornada.operador_actual = operador.clone();
+    jornada.operadores_activos = vec![operador.clone()];
+    if !jornada.operadores_relevo.contains(&operador) {
+        jornada.operadores_relevo.push(operador);
+    }
+    con_ledger(&estado, |db| db.guardar_jornada(&jornada))?;
+    notificar_panel(&estado);
+    Ok(jornada)
+}
+
+#[tauri::command]
+fn cerrar_jornada(estado: tauri::State<AppState>) -> Result<Jornada, UIError> {
+    config_requerida(&estado)?;
+    let tasa = tasa_viva(&estado)?;
+    let mut jornada = con_ledger(&estado, |db| db.jornada_actual())?
+        .ok_or_else(|| UIError::new("sin jornada", "No hay jornada abierta para cerrar"))?;
+    jornada.estado = "cerrada".to_string();
+    jornada.fin_unix = Some(ahora_unix());
+    jornada.tasa_fin = Some(tasa);
+    let checksum = format!("{:x}", Sha256::digest(jornada.id.as_bytes()));
+    jornada.checksum_sha256 = Some(checksum);
+    con_ledger(&estado, |db| db.guardar_jornada(&jornada))?;
+    notificar_panel(&estado);
+    Ok(jornada)
+}
+
+// ---------------- comandos: cuentas (eliminar consumo, abonar, editar abono) ----------------
+
+#[tauri::command]
+fn eliminar_consumo(
+    estado: tauri::State<AppState>,
+    venta_id: String,
+    consumo_idx: usize,
+) -> Result<CuentaDto, UIError> {
+    config_requerida(&estado)?;
+    let actualizada = con_ledger(&estado, |db| {
+        let mut venta = db
+            .cargar_venta(&venta_id)?
+            .filter(|v| v.es_cuenta_abierta && v.estado == EstadoVenta::Abierta)
+            .ok_or(DbError::Negocio(ErrorNegocio::CuentaInvalida(venta_id.clone())))?;
+        if consumo_idx >= venta.lineas.skus.len() {
+            return Err(DbError::Negocio(ErrorNegocio::CuentaInvalida(venta_id)));
+        }
+        let sku = venta.lineas.skus[consumo_idx];
+        let cantidad = venta.lineas.cantidades[consumo_idx];
+        venta.lineas.skus.remove(consumo_idx);
+        venta.lineas.nombres.remove(consumo_idx);
+        venta.lineas.cantidades.remove(consumo_idx);
+        venta.lineas.precios_usd.remove(consumo_idx);
+        venta.lineas.tasas_bloqueadas.remove(consumo_idx);
+        let tree_p = db.inner_db().open_tree("productos")?;
+        let sin_stock = tree_p.get(sku.as_bytes())?
+            .and_then(|v| bincode::deserialize::<Producto>(&v).ok())
+            .map(|p| p.sin_stock)
+            .unwrap_or(false);
+        if !sin_stock {
+            let mov = MovimientoStock {
+                id: Uuid::new_v4().to_string(),
+                sku: sku.as_str().to_string(),
+                delta: cantidad,
+                motivo: MotivoMovimiento::Ajuste,
+                venta_id: Some(venta_id),
+                fecha_unix: ahora_unix(),
+                firma_sha256: String::new(),
+            };
+            db.aplicar_movimiento(mov, |_, _| {})?;
+        }
+        db.guardar_venta(venta)
+    })?;
+    notificar_panel(&estado);
+    Ok(cuenta_dto(&actualizada))
+}
+
+#[tauri::command]
+fn abonar_cuenta(
+    estado: tauri::State<AppState>,
+    venta_id: String,
+    monto_usd: Option<f64>,
+    monto_bs: Option<f64>,
+) -> Result<CuentaDto, UIError> {
+    config_requerida(&estado)?;
+    let usd = monto_usd.map(|v| Decimal::try_from(v).unwrap_or(Decimal::ZERO)).unwrap_or(Decimal::ZERO);
+    let bs = monto_bs.map(|v| Decimal::try_from(v).unwrap_or(Decimal::ZERO)).unwrap_or(Decimal::ZERO);
+    let actualizada = con_ledger(&estado, |db| {
+        let mut venta = db
+            .cargar_venta(&venta_id)?
+            .filter(|v| v.es_cuenta_abierta && v.estado == EstadoVenta::Abierta)
+            .ok_or(DbError::Negocio(ErrorNegocio::CuentaInvalida(venta_id)))?;
+        venta.abonos_usd = Some(venta.abonos_usd.unwrap_or(Decimal::ZERO) + usd);
+        venta.abonos_bs = Some(venta.abonos_bs.unwrap_or(Decimal::ZERO) + bs);
+        db.guardar_venta(venta)
+    })?;
+    notificar_panel(&estado);
+    Ok(cuenta_dto(&actualizada))
+}
+
+#[tauri::command]
+fn editar_abono_cuenta(
+    estado: tauri::State<AppState>,
+    venta_id: String,
+    nuevo_abono_usd: f64,
+) -> Result<CuentaDto, UIError> {
+    config_requerida(&estado)?;
+    let usd = Decimal::try_from(nuevo_abono_usd).unwrap_or(Decimal::ZERO);
+    let actualizada = con_ledger(&estado, |db| {
+        let mut venta = db
+            .cargar_venta(&venta_id)?
+            .filter(|v| v.es_cuenta_abierta && v.estado == EstadoVenta::Abierta)
+            .ok_or(DbError::Negocio(ErrorNegocio::CuentaInvalida(venta_id)))?;
+        venta.abonos_usd = Some(usd.max(Decimal::ZERO));
+        db.guardar_venta(venta)
+    })?;
+    notificar_panel(&estado);
+    Ok(cuenta_dto(&actualizada))
+}
+
+// ---------------- comandos: listar ventas ----------------
+
+#[tauri::command]
+fn listar_ventas(estado: tauri::State<AppState>) -> Result<Vec<TicketDto>, UIError> {
+    config_requerida(&estado)?;
+    let ventas = con_ledger(&estado, |db| db.ventas_recientes(200))?;
+    Ok(ventas.iter().map(|v| armar_ticket(v, v.monto_recibido_bs, v.vuelto_bs)).collect())
+}
+
+// ---------------- comandos: historico tasas ----------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RegistroHistoricoTasa {
+    id: String,
+    valor: String,
+    fecha_hora: String,
+    tipo: String,
+}
+
+#[tauri::command]
+fn listar_historico_tasas(estado: tauri::State<AppState>) -> Result<Vec<RegistroHistoricoTasa>, UIError> {
+    config_requerida(&estado)?;
+    let tasas = con_ledger(&estado, |db| db.ultimas_tasas(50))?;
+    Ok(tasas.iter().enumerate().map(|(i, t)| RegistroHistoricoTasa {
+        id: format!("tasa-{}", i),
+        valor: t.valor_bs_por_usd.to_string(),
+        fecha_hora: chrono::DateTime::from_timestamp(t.fecha_unix, 0)
+            .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+            .unwrap_or_default(),
+        tipo: "automatico".to_string(),
+    }).collect())
+}
+
+// ---------------- comandos: respaldos (aliases) ----------------
+
+#[tauri::command]
+fn crear_respaldo(estado: tauri::State<AppState>) -> Result<BackupMetadataDto, UIError> {
+    let dir = get_backup_dir()?;
+    std::fs::create_dir_all(&dir).map_err(|e| UIError::new("error directorio", &e.to_string()))?;
+    let ruta = std::path::Path::new(&dir).join(format!("datio_{}.backup", ahora_unix()));
+    let ruta_str = ruta.to_string_lossy().to_string();
+    let payload = BackupRuta { ruta: ruta_str };
+    exportar_backup(estado, payload)
+}
+
+#[tauri::command]
+fn listar_respaldos(estado: tauri::State<AppState>) -> Result<Vec<BackupInfo>, UIError> {
+    let dir = get_backup_dir()?;
+    let directorio = dir.clone();
+    let archivos = std::fs::read_dir(&dir).map_err(|e| UIError::new("error directorio", &e.to_string()))?;
+    let mut infos = Vec::new();
+    for entrada in archivos.flatten() {
+        let ruta = entrada.path();
+        if ruta.extension().map(|e| e == "backup").unwrap_or(false) {
+            if let Ok(bytes) = std::fs::read(&ruta) {
+                if bytes.len() > 44 {
+                    let meta: Result<BackupMetadata, _> = bincode::deserialize(&bytes[44..]);
+                    if let Ok(meta) = meta {
+                        infos.push(BackupInfo {
+                            ruta: ruta.to_string_lossy().to_string(),
+                            metadata: BackupMetadataDto {
+                                version: meta.version,
+                                timestamp_unix: meta.timestamp_unix,
+                                arboles: meta.arboles,
+                                total_registros: meta.total_registros,
+                                checksum_sha256: meta.checksum_sha256,
+                            },
+                        });
+                    }
+                }
+            }
+        }
+    }
+    Ok(infos)
+}
+
+#[tauri::command]
+fn restaurar_desde_respaldo(
+    state: tauri::State<AppState>,
+    archivo: Option<String>,
+) -> Result<bool, UIError> {
+    let ruta = archivo.unwrap_or_else(|| {
+        let dir = get_backup_dir().unwrap_or_default();
+        std::path::Path::new(&dir)
+            .join(format!("datio_{}.backup", ahora_unix()))
+            .to_string_lossy()
+            .to_string()
+    });
+    let payload = BackupRuta { ruta };
+    importar_backup(state, payload)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1816,6 +3041,7 @@ pub fn run() {
                 ledger: ledger_arc.clone(),
                 servicio_tasa: servicio_tasa.clone(),
                 session_store: SessionStore::new(&db_sled)?,
+                tx: broadcast::channel(16).0,
             };
 
             app.manage(app_state.clone());
@@ -1825,11 +3051,12 @@ pub fn run() {
             let session_store = app_state.session_store.clone();
             let ledger_for_axum = ledger_arc.clone();
             let servicio_tasa_for_axum = servicio_tasa.clone();
+            let tx_for_axum = app_state.tx.clone();
 
             tauri::async_runtime::spawn(async move {
                 let cors = CorsLayer::new()
                     .allow_origin(Any)
-                    .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+                    .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
                     .allow_headers(Any)
                     .allow_credentials(true);
 
@@ -1840,7 +3067,49 @@ pub fn run() {
                     .route("/api/tasa/aplicar", post(api_tasa_aplicar))
                     .route("/api/tasa/manual", post(api_tasa_manual))
                     .route("/api/cuentas", get(api_cuentas))
+                    .route("/api/cuentas", post(api_cuentas_abrir))
+                    .route("/api/cuentas/:id/consumo", post(api_cuentas_consumo))
+                    .route("/api/cuentas/:id/consumo/:idx", delete(api_cuentas_eliminar_consumo))
+                    .route("/api/cuentas/:id/abonar", post(api_cuentas_abonar))
+                    .route("/api/cuentas/:id/cerrar", post(api_cuentas_cerrar))
                     .route("/api/productos", get(api_productos))
+                    .route("/api/productos", post(api_productos_crear))
+                    .route("/api/productos/:sku", delete(api_productos_eliminar))
+                    .route("/api/productos/:sku/compra", post(api_productos_compra))
+                    .route("/api/productos/:sku/reducir", post(api_productos_reducir))
+                    .route("/api/productos/:sku/merma", post(api_productos_merma))
+                    .route("/api/ventas", get(api_ventas_listar))
+                    .route("/api/ventas", post(api_ventas_registrar))
+                    .route("/api/categorias", get(api_categorias_listar))
+                    .route("/api/categorias", post(api_categorias_crear))
+                    .route("/api/categorias/:id", delete(api_categorias_eliminar))
+                    .route("/api/tasas-impuestos", get(api_tasas_impuestos_listar))
+                    .route("/api/tasas-impuestos", post(api_tasas_impuestos_crear))
+                    .route("/api/tasas-impuestos/:id", delete(api_tasas_impuestos_eliminar))
+                    .route("/api/metodos-pago", get(api_metodos_pago_listar))
+                    .route("/api/metodos-pago", post(api_metodos_pago_crear))
+                    .route("/api/metodos-pago/:nombre", delete(api_metodos_pago_eliminar))
+                    .route("/api/operadores", get(api_operadores_listar))
+                    .route("/api/operadores", post(api_operadores_crear))
+                    .route("/api/operadores/:id", put(api_operadores_editar))
+                    .route("/api/operadores/:id", delete(api_operadores_eliminar))
+                    .route("/api/operadores/:id/alternar", post(api_operadores_alternar))
+                    .route("/api/jornadas", get(api_jornadas_listar))
+                    .route("/api/jornadas/actual", get(api_jornada_actual))
+                    .route("/api/jornadas/abrir", post(api_jornadas_abrir))
+                    .route("/api/jornadas/cerrar", post(api_jornadas_cerrar))
+                    .route("/api/jornadas/asignar", post(api_jornadas_asignar))
+                    .route("/api/jornadas/relevar", post(api_jornadas_relevar))
+                    .route("/api/dispositivos", get(api_dispositivos_listar))
+                    .route("/api/dispositivos", post(api_dispositivos_registrar))
+                    .route("/api/dispositivos/:id", delete(api_dispositivos_revocar))
+                    .route("/api/semaforo", get(api_semaforo_obtener))
+                    .route("/api/semaforo", post(api_semaforo_guardar))
+                    .route("/api/pin/cambiar", post(api_pin_cambiar))
+                    .route("/api/respaldos", get(api_respaldos_listar))
+                    .route("/api/respaldos", post(api_respaldos_crear))
+                    .route("/api/respaldos/restaurar", post(api_respaldos_restaurar))
+                    .route("/api/historico-tasas", get(api_historico_tasas))
                     .layer(middleware::from_fn_with_state(
                         session_store.clone(),
                         auth_middleware,
@@ -1862,7 +3131,7 @@ pub fn run() {
                         ledger: ledger_for_axum,
                         servicio_tasa: servicio_tasa_for_axum,
                         session_store,
-                        tx: broadcast::channel(16).0,
+                        tx: tx_for_axum,
                         signaling: Arc::new(Mutex::new(HashMap::new())),
                     });
 
@@ -1894,6 +3163,7 @@ pub fn run() {
             obtener_tasa_pendiente,
             aplicar_tasa_pendiente,
             establecer_tasa_manual,
+            fijar_tasa_manual,
             show_main_window,
             api_login,
             api_logout,
@@ -1904,7 +3174,43 @@ pub fn run() {
             importar_backup,
             listar_backups,
             auto_backup,
-            get_backup_dir
+            get_backup_dir,
+            listar_categorias,
+            crear_categoria,
+            eliminar_categoria,
+            listar_tasas_impuestos,
+            crear_tasa_impuesto,
+            eliminar_tasa_impuesto,
+            listar_metodos_pago,
+            crear_metodo_pago,
+            eliminar_metodo_pago,
+            listar_operadores,
+            crear_operador,
+            editar_operador,
+            eliminar_operador,
+            alternar_operador,
+            listar_dispositivos,
+            registrar_dispositivo,
+            revocar_dispositivo,
+            obtener_semaforo_stock,
+            guardar_semaforo_stock,
+            cambiar_pin_dueno,
+            eliminar_producto,
+            reducir_stock,
+            obtener_jornada_actual,
+            listar_historico_jornadas,
+            abrir_jornada,
+            asignar_operadores_turno,
+            relevar_operador_jornada,
+            cerrar_jornada,
+            eliminar_consumo,
+            abonar_cuenta,
+            editar_abono_cuenta,
+            listar_ventas,
+            listar_historico_tasas,
+            crear_respaldo,
+            listar_respaldos,
+            restaurar_desde_respaldo
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {
