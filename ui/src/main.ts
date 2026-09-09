@@ -37,6 +37,9 @@ class AppController {
         iceServers: [
             { urls: 'stun:stun.cloudflare.com:3478' },
             { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+            { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+            { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
         ],
     };
 
@@ -351,7 +354,7 @@ class AppController {
                 <div class="flex justify-between items-center border-b-2 border-brand-black pb-3 mb-4">
                     <div>
                         <h3 class="font-heading font-black text-2xl">CONEXION MOVIL P2P</h3>
-                        <p class="font-body text-xs text-gray-600">WebRTC DataChannel - Funciona dentro y fuera de LAN</p>
+                        <p class="font-body text-xs text-gray-600">WebRTC DataChannel + TURN Relay - Funciona dentro y fuera de LAN</p>
                     </div>
                     <button id="qr-cerrar" class="w-8 h-8 rounded border-2 border-brand-black flex items-center justify-center font-black text-lg hover:bg-gray-100">&times;</button>
                 </div>
@@ -373,7 +376,7 @@ class AppController {
                             ${roomId ? `<p class="text-[10px] text-gray-400 mt-1 font-mono">Room: ${roomId}</p>` : ''}
                         </div>
                         <div class="bg-green-100 border border-brand-black rounded p-2 text-[10px] font-bold text-green-900 mt-2">
-                            WebRTC P2P: Funciona dentro y fuera de LAN con STUN publico.
+                            WebRTC P2P: Funciona dentro y fuera de LAN. TURN relay para NAT simetrico.
                         </div>
                     </div>
 
@@ -395,7 +398,7 @@ class AppController {
                 </div>
 
                 <div class="flex justify-between items-center pt-3 border-t-2 border-brand-black text-xs text-gray-500 font-bold">
-                    <span>STUN: stun.cloudflare.com | stun.l.google.com</span>
+                    <span>STUN/TURN: Cloudflare | Google | OpenRelay</span>
                     <button id="qr-cerrar-btn" class="bg-brand-black text-white px-4 py-2 rounded font-black font-heading text-xs">CERRAR</button>
                 </div>
             </div>

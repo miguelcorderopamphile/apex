@@ -18,6 +18,17 @@ const parseNum = (n: unknown): number => {
 const fmt = (n: number | string | undefined | null): string =>
     parseNum(n).toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+function fmtStock(p: { stock: unknown; sinStock?: boolean; esCaja?: boolean; unidadesPorCaja?: number }): string {
+    if (p.sinStock) return 'Ilimitado';
+    const st = Number(p.stock);
+    if (p.esCaja && p.unidadesPorCaja && p.unidadesPorCaja > 1) {
+        const cajas = Math.floor(st / p.unidadesPorCaja);
+        const sueltas = st % p.unidadesPorCaja;
+        return `${cajas} cj. + ${sueltas} un.`;
+    }
+    return `${st} un.`;
+}
+
 const sanitizarInputDecimal = (
     inputEl: HTMLInputElement,
     maxValor: number,
@@ -447,7 +458,7 @@ export class CuentasView {
                                     </div>
                                     <div class="flex justify-between items-center mt-1">
                                         <p class="text-brand-black font-black">$${fmt(p.precioUsd)}</p>
-                                        <span class="text-[10px] ${agotado ? "text-red-700 font-black" : "text-gray-500"}">${p.sinStock ? "Ilimitado" : `${p.stock} un.`}</span>
+                                        <span class="text-[10px] ${agotado ? "text-red-700 font-black" : "text-gray-500"}">${fmtStock(p)}</span>
                                     </div>
                                 </button>`;
                             }).join("")}
@@ -554,7 +565,7 @@ export class CuentasView {
                             </div>
                             <div class="flex justify-between items-center mt-1">
                                 <p class="text-brand-black font-black">$${fmt(p.precioUsd)}</p>
-                                <span class="text-[10px] ${agotado ? "text-red-700 font-black" : "text-gray-500"}">${p.sinStock ? "Ilimitado" : `${p.stock} un.`}</span>
+                                <span class="text-[10px] ${agotado ? "text-red-700 font-black" : "text-gray-500"}">${fmtStock(p)}</span>
                             </div>
                         </button>`;
                     }).join("");

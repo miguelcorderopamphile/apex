@@ -292,7 +292,13 @@
         // WebRTC P2P State
         let peerConnection = null, dataChannel = null, p2pConnected = false, wsSignaling = null;
         let pendingRequests = new Map(), requestCounter = 0;
-        const STUN_SERVERS = [{urls:'stun:stun.cloudflare.com:3478'},{urls:'stun:stun.l.google.com:19302'}];
+        const STUN_SERVERS = [
+            {urls:'stun:stun.cloudflare.com:3478'},
+            {urls:'stun:stun.l.google.com:19302'},
+            {urls:'turn:openrelay.metered.ca:80',username:'openrelayproject',credential:'openrelayproject'},
+            {urls:'turn:openrelay.metered.ca:443',username:'openrelayproject',credential:'openrelayproject'},
+            {urls:'turn:openrelay.metered.ca:443?transport=tcp',username:'openrelayproject',credential:'openrelayproject'},
+        ];
 
         function showToast(m, err) { const t = document.getElementById('toast'); t.textContent = m; t.style.borderColor = err ? '#ef4444' : '#1e293b'; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3000); }
         function fmtUsd(n) { return '$' + Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
@@ -401,7 +407,7 @@
             document.getElementById('inv-total').textContent = p.totalProductos;
             const cl = document.getElementById('criticos-list');
             if(!p.criticos.length){cl.innerHTML='<div style="text-align:center;color:var(--muted);padding:12px;">Sin criticos</div>';}
-            else{let h='';for(let i=0;i<p.criticos.length;i++){const c=p.criticos[i];h+=`<div class="row"><div><strong>${c.nombre}</strong><br><span style="font-size:11px;color:var(--muted);">${c.sku}</span></div><span class="badge badge-red">${c.stock}</span></div>`;}cl.innerHTML=h;}
+            else{let h='';for(let i=0;i<p.criticos.length;i++){const c=p.criticos[i];const stockStr=(c.esCaja&&c.unidadesPorCaja&&c.unidadesPorCaja>1)?Math.floor(c.stock/c.unidadesPorCaja)+' cj. + '+c.stock%c.unidadesPorCaja+' un.':c.stock;h+=`<div class="row"><div><strong>${c.nombre}</strong><br><span style="font-size:11px;color:var(--muted);">${c.sku}</span></div><span class="badge badge-red">${stockStr}</span></div>`;}cl.innerHTML=h;}
             renderTopChart(p.topProductos,p.topProductos.length);
         }
         function renderTasa(t,pend) {
@@ -420,7 +426,7 @@
             const sl=document.getElementById('productos-list');if(!sl)return;
             const q=(document.getElementById('buscar-productos')?.value||'').trim().toLowerCase();
             const f=p.filter(x=>x.nombre.toLowerCase().includes(q)||x.sku.toLowerCase().includes(q));
-            let h='';for(const x of f){const isCrit=x.stock<=5;h+=`<div class="row"><div><strong>${x.nombre}</strong><br><span style="font-size:11px;color:var(--muted);">${x.sku} &middot; $${Number(x.precioUsd).toFixed(2)}</span></div><span class="badge ${isCrit?'badge-red':'badge-green'}">${x.stock}</span></div>`;}
+            let h='';for(const x of f){const isCrit=x.stock<=5;const stockStr=(x.esCaja&&x.unidadesPorCaja&&x.unidadesPorCaja>1)?Math.floor(x.stock/x.unidadesPorCaja)+' cj. + '+x.stock%x.unidadesPorCaja+' un.':x.stock;h+=`<div class="row"><div><strong>${x.nombre}</strong><br><span style="font-size:11px;color:var(--muted);">${x.sku} &middot; $${Number(x.precioUsd).toFixed(2)}</span></div><span class="badge ${isCrit?'badge-red':'badge-green'}">${stockStr}</span></div>`;}
             sl.innerHTML=h||'<div style="text-align:center;color:var(--muted);padding:12px;">Sin productos</div>';
         }
         function renderTopChart(top,len) {
