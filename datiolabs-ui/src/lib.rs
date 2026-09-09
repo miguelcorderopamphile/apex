@@ -342,10 +342,82 @@ async fn api_panel(State(state): State<AxumAppState>) -> Result<Json<PanelDto>, 
         }
     }
 
-    let abiertas = ledger
+    let cuentas_todas = ledger
         .cuentas_abiertas()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?
-        .len();
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let abiertas = cuentas_todas.len();
+
+    // Financial metrics
+    let tasa = state.servicio_tasa.info_actual().valor;
+    let costo_total_usd = usd * rust_decimal_macros::dec!(0.65);
+    let ganancia_bruta_usd = usd - costo_total_usd;
+    let impuestos_usd = usd * rust_decimal_macros::dec!(0.12);
+    let ganancia_neta_usd = ganancia_bruta_usd - impuestos_usd;
+    let ganancia_neta_sin_imp_usd = ganancia_bruta_usd;
+    let ganancia_neta_bs = ganancia_neta_usd * tasa;
+
+    // Deudas y dinero en la calle
+    let deudas_abiertas = cuentas_todas.iter()
+        .filter(|v| v.tipo == "deuda")
+        .count();
+    let dinero_en_la_calle_usd: Decimal = cuentas_todas.iter()
+        .filter(|v| v.tipo == "deuda")
+        .map(|v| {
+            let total = v.lineas.total_usd();
+            let abonos = v.abonos_usd.unwrap_or(Decimal::ZERO);
+            if total > abonos { total - abonos } else { Decimal::ZERO }
+        })
+        .sum();
+    let dinero_en_la_calle_bs = dinero_en_la_calle_usd * tasa;
+
+    // Dinero por categoria
+    let categorias = ledger.listar_categorias()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let mut mapa_cats: std::collections::HashMap<String, (usize, Decimal, Decimal, Decimal)> =
+        std::collections::HashMap::new();
+    let mut total_bruto_global: Decimal = Decimal::ZERO;
+    for i in 0..catalogo.len() {
+        let cat_id = catalogo.categoria_id(i).unwrap_or_else(|| "cat-general".to_string());
+        let entry = mapa_cats.entry(cat_id.clone()).or_insert((0, Decimal::ZERO, Decimal::ZERO, Decimal::ZERO));
+        entry.0 += 1;
+        let st = if catalogo.sin_stock(i) { Decimal::ZERO } else { catalogo.stock(i) };
+        let bruto_unit = catalogo.precio_bruto_usd(i).unwrap_or(catalogo.precio_usd(i) * rust_decimal_macros::dec!(0.65));
+        let venta_unit = catalogo.precio_usd(i);
+        entry.1 += st;
+        entry.2 += st * bruto_unit;
+        entry.3 += st * venta_unit;
+        total_bruto_global += st * bruto_unit;
+    }
+    let cat_nombre_map: std::collections::HashMap<String, String> = categorias.iter()
+        .map(|c| (c.id.clone(), c.nombre.clone()))
+        .collect();
+    let mut dinero_por_categoria: Vec<CategoriaDineroBrutoDto> = mapa_cats.into_iter()
+        .filter(|(_, (n, _, b, _))| *n > 0 || *b > Decimal::ZERO)
+        .map(|(cat_id, (cant_prod, unidades, bruto, venta))| {
+            let nombre = cat_nombre_map.get(&cat_id).cloned().unwrap_or_else(|| "General".to_string());
+            let margen = if venta > bruto { venta - bruto } else { Decimal::ZERO };
+            let margen_pct = if venta > Decimal::ZERO {
+                format!("{:.1}", margen / venta * rust_decimal_macros::dec!(100))
+            } else { "0.0".to_string() };
+            let pct_cap = if total_bruto_global > Decimal::ZERO {
+                format!("{:.1}", bruto / total_bruto_global * rust_decimal_macros::dec!(100))
+            } else { "0.0".to_string() };
+            CategoriaDineroBrutoDto {
+                categoria_id: cat_id,
+                nombre,
+                cantidad_productos: cant_prod,
+                unidades_stock: unidades,
+                dinero_bruto_usd: bruto,
+                dinero_bruto_bs: bruto * tasa,
+                dinero_venta_usd: venta,
+                dinero_venta_bs: venta * tasa,
+                margen_bruto_proyectado_usd: margen,
+                margen_bruto_pct: margen_pct,
+                porcentaje_capital: pct_cap,
+            }
+        })
+        .collect();
+    dinero_por_categoria.sort_by(|a, b| b.dinero_bruto_usd.cmp(&a.dinero_bruto_usd));
 
     Ok(Json(PanelDto {
         ventas_24h_usd: usd,
@@ -353,9 +425,18 @@ async fn api_panel(State(state): State<AxumAppState>) -> Result<Json<PanelDto>, 
         tickets_24h: tickets,
         total_productos: catalogo.len(),
         valor_inventario_usd: catalogo.valor_inventario_usd(),
+        costo_total_usd,
+        ganancia_bruta_usd,
+        ganancia_neta_usd,
+        ganancia_neta_sin_imp_usd,
+        ganancia_neta_bs,
         criticos,
         cuentas_abiertas: abiertas,
+        deudas_abiertas,
+        dinero_en_la_calle_usd,
+        dinero_en_la_calle_bs,
         top_productos: top,
+        dinero_por_categoria,
     }))
 }
 
@@ -579,11 +660,20 @@ async fn api_cuentas_consumo(
     let catalogo = db.cargar_catalogo().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let idx = catalogo.indice_de(&sku).ok_or((StatusCode::BAD_REQUEST, "SKU inválido".to_string()))?;
     let cant: rust_decimal::Decimal = cantidad.parse().map_err(|e| (StatusCode::BAD_REQUEST, format!("Cantidad inválida: {e}")))?;
+    validar_linea(catalogo.capacidades(idx), cant, catalogo.stock(idx))
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("{e}")))?;
     let tasa = state.servicio_tasa.info_actual().valor;
-    venta.lineas.agregar(
-        catalogo.sku_obj(idx), catalogo.nombre_obj(idx),
-        cant, catalogo.precio_usd(idx), tasa,
-    );
+    let sku_obj = catalogo.sku_obj(idx);
+    if let Some(pos) = venta.lineas.skus.iter().position(|s| s == &sku_obj) {
+        venta.lineas.cantidades[pos] += cant;
+    } else {
+        venta.lineas.agregar(
+            sku_obj, catalogo.nombre_obj(idx),
+            cant, catalogo.precio_usd(idx), tasa,
+        );
+    }
+    descontar_con_lotes_interno(&*db, &catalogo, idx, cant, &venta.id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     db.guardar_venta(venta).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db);
     let _ = state.tx.send(());
@@ -601,11 +691,34 @@ async fn api_cuentas_eliminar_consumo(
     if idx >= venta.lineas.skus.len() {
         return Err((StatusCode::BAD_REQUEST, "Solicitud inválida".to_string()));
     }
+    let sku_removed = venta.lineas.skus[idx];
+    let cant_removed = venta.lineas.cantidades[idx];
     venta.lineas.skus.remove(idx);
     venta.lineas.nombres.remove(idx);
     venta.lineas.cantidades.remove(idx);
     venta.lineas.precios_usd.remove(idx);
     venta.lineas.tasas_bloqueadas.remove(idx);
+    // Restaurar stock si el producto controla inventario
+    let tree_p = db.inner_db().open_tree("productos")
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let sin_stock = tree_p.get(sku_removed.as_bytes())
+        .ok().flatten()
+        .and_then(|v| bincode::deserialize::<datiolabs_core::models::Producto>(&v).ok())
+        .map(|p| p.sin_stock)
+        .unwrap_or(false);
+    if !sin_stock {
+        let mov = datiolabs_core::models::MovimientoStock {
+            id: uuid::Uuid::new_v4().to_string(),
+            sku: sku_removed.as_str().to_string(),
+            delta: cant_removed,
+            motivo: datiolabs_core::models::MotivoMovimiento::Ajuste,
+            venta_id: Some(id.clone()),
+            fecha_unix: ahora_unix(),
+            firma_sha256: String::new(),
+        };
+        db.aplicar_movimiento(mov, |_, _| {})
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    }
     db.guardar_venta(venta).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db);
     let _ = state.tx.send(());
@@ -643,13 +756,28 @@ async fn api_cuentas_cerrar(
     let mut venta = db.cargar_venta(&id).ok().flatten()
         .filter(|v| v.es_cuenta_abierta && v.estado == datiolabs_core::models::EstadoVenta::Abierta)
         .ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
+    let total_usd = venta.lineas.total_usd();
+    let total_bs = venta.lineas.total_bs();
+    let es_deuda = venta.tipo == "deuda";
     venta.estado = datiolabs_core::models::EstadoVenta::Cerrada;
-    venta.total_usd = venta.lineas.total_usd();
-    venta.total_bs = venta.lineas.total_bs();
+    venta.total_usd = total_usd;
+    venta.total_bs = total_bs;
     venta.monto_recibido_bs = recibido;
-    venta.vuelto_bs = if recibido > venta.total_bs { recibido - venta.total_bs } else { rust_decimal::Decimal::ZERO };
+    venta.vuelto_bs = if recibido > total_bs { recibido - total_bs } else { rust_decimal::Decimal::ZERO };
     venta.fecha_cierre_unix = ahora_unix();
     db.guardar_venta(venta).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+
+    // Actualizar contadores de la jornada activa
+    if let Ok(Some(mut jornada)) = db.jornada_actual() {
+        jornada.ventas_total_usd += total_usd;
+        jornada.ventas_total_bs += total_bs;
+        jornada.tickets_emitidos += 1;
+        if es_deuda {
+            jornada.deudas_liquidadas_usd += total_usd;
+        }
+        let _ = db.guardar_jornada(&jornada);
+    }
+
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -780,33 +908,109 @@ async fn api_ventas_registrar(
     let items = body.get("items").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     if items.is_empty() { return Err((StatusCode::BAD_REQUEST, "Solicitud inválida".to_string())); }
     let tasa = state.servicio_tasa.info_actual().valor;
+    let monto_recibido_bs: rust_decimal::Decimal = body.get("montoRecibidoBs")
+        .and_then(|v| v.as_str()).and_then(|s| s.parse().ok())
+        .unwrap_or(rust_decimal::Decimal::ZERO);
+
     let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let catalogo = db.cargar_catalogo().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+
+    // Validate stock and build lineas
     let mut lineas = datiolabs_core::models::LineasVenta::nuevas();
+    let mut toques: Vec<(usize, rust_decimal::Decimal)> = Vec::with_capacity(items.len());
     for item in &items {
         let sku_str = item.get("sku").and_then(|v| v.as_str()).unwrap_or("");
         let cant: rust_decimal::Decimal = item.get("cantidad").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or(rust_decimal::Decimal::ONE);
-        if let Some(idx) = catalogo.indice_de(sku_str) {
-            lineas.agregar(catalogo.sku_obj(idx), catalogo.nombre_obj(idx), cant, catalogo.precio_usd(idx), tasa);
-        }
+        let idx = catalogo.indice_de(sku_str)
+            .ok_or((StatusCode::BAD_REQUEST, format!("SKU inexistente: {sku_str}")))?;
+        validar_linea(catalogo.capacidades(idx), cant, catalogo.stock(idx))
+            .map_err(|e| (StatusCode::BAD_REQUEST, format!("{e}")))?;
+        toques.push((idx, cant));
+        lineas.agregar(catalogo.sku_obj(idx), catalogo.nombre_obj(idx), cant, catalogo.precio_usd(idx), tasa);
     }
-    let total_bs = lineas.total_bs();
+
     let total_usd = lineas.total_usd();
+    let total_bs = lineas.total_bs();
+    if monto_recibido_bs > rust_decimal::Decimal::ZERO && monto_recibido_bs < total_bs {
+        return Err((StatusCode::BAD_REQUEST, "El pago recibido no cubre el total en bolivares".to_string()));
+    }
+    let vuelto = if monto_recibido_bs > rust_decimal::Decimal::ZERO {
+        monto_recibido_bs - total_bs
+    } else {
+        rust_decimal::Decimal::ZERO
+    };
+
+    // Parse pagos
+    let pagos_body = body.get("pagos").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let pagos_model: Vec<datiolabs_core::models::PagoVenta> = pagos_body.iter().map(|p| {
+        datiolabs_core::models::PagoVenta {
+            metodo: p.get("metodo").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            moneda: p.get("moneda").and_then(|v| v.as_str()).unwrap_or("BS").to_string(),
+            monto_usd: p.get("montoUsd").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or(rust_decimal::Decimal::ZERO),
+            monto_bs: p.get("montoBs").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or(rust_decimal::Decimal::ZERO),
+            tasa_cambio: p.get("tasaCambio").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()),
+            referencia: p.get("referencia").and_then(|v| v.as_str()).map(String::from),
+        }
+    }).collect();
+
+    // Parse resolucion_vuelto
+    let res_vuelto = body.get("resolucionVuelto");
+    let (estado_v, metodo_v, monto_v_usd, tasa_v) = match res_vuelto {
+        Some(res) => (
+            res.get("estado").and_then(|v| v.as_str()).map(String::from),
+            res.get("metodo").and_then(|v| v.as_str()).map(String::from),
+            res.get("montoUsd").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()),
+            res.get("tasa").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()),
+        ),
+        None => {
+            let est = if vuelto > rust_decimal::Decimal::ZERO {
+                Some("PAGADO".to_string())
+            } else {
+                Some("SIN_VUELTO".to_string())
+            };
+            (est, None, None, None)
+        }
+    };
+
+    // Deduct stock
+    let venta_id = uuid::Uuid::new_v4().to_string();
+    for (idx, cantidad) in &toques {
+        descontar_con_lotes_interno(&*db, &catalogo, *idx, *cantidad, &venta_id)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    }
+
     let venta = datiolabs_core::models::Venta {
-        id: uuid::Uuid::new_v4().to_string(), etiqueta: String::new(),
+        id: venta_id, etiqueta: String::new(),
         es_cuenta_abierta: false, estado: datiolabs_core::models::EstadoVenta::Cerrada,
         lineas, tasa_del_dia: tasa, total_usd, total_bs,
-        monto_recibido_bs: total_bs, vuelto_bs: rust_decimal::Decimal::ZERO,
-        pagos: Vec::new(), estado_vuelto: Some("SIN_VUELTO".to_string()),
-        metodo_vuelto: None, monto_vuelto_usd: None, tasa_vuelto: None,
+        monto_recibido_bs, vuelto_bs: vuelto,
+        pagos: pagos_model, estado_vuelto: estado_v, metodo_vuelto: metodo_v,
+        monto_vuelto_usd: monto_v_usd, tasa_vuelto: tasa_v,
         fecha_apertura_unix: ahora_unix(), fecha_cierre_unix: ahora_unix(),
         firma_sha256: String::new(), tipo: "venta".to_string(),
         cliente: None, nota: None, abonos_usd: None, abonos_bs: None,
     };
-    db.guardar_venta(venta).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let firmada = db.guardar_venta(venta)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+
+    // Actualizar contadores de la jornada activa
+    if let Ok(Some(mut jornada)) = db.jornada_actual() {
+        jornada.ventas_total_usd += total_usd;
+        jornada.ventas_total_bs += total_bs;
+        jornada.tickets_emitidos += 1;
+        match firmada.estado_vuelto.as_deref() {
+            Some("PAGADO") => { jornada.vuelto_pagado_bs += vuelto; }
+            Some("RETENIDO") => { jornada.vuelto_retenido_bs += vuelto; }
+            _ => {}
+        }
+        let _ = db.guardar_jornada(&jornada);
+    }
+
+    // Build and return TicketDto
+    let ticket = armar_ticket(&firmada, monto_recibido_bs, vuelto);
     drop(db);
     let _ = state.tx.send(());
-    Ok(Json(serde_json::json!({ "ok": true })))
+    Ok(Json(serde_json::to_value(ticket).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error serializando ticket: {e}")))?))
 }
 
 // CRUD categorias
@@ -1367,15 +1571,40 @@ const MAX_PANEL_CRITICOS: usize = 16;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct CategoriaDineroBrutoDto {
+    categoria_id: String,
+    nombre: String,
+    cantidad_productos: usize,
+    unidades_stock: Decimal,
+    dinero_bruto_usd: Decimal,
+    dinero_bruto_bs: Decimal,
+    dinero_venta_usd: Decimal,
+    dinero_venta_bs: Decimal,
+    margen_bruto_proyectado_usd: Decimal,
+    margen_bruto_pct: String,
+    porcentaje_capital: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct PanelDto {
     ventas_24h_usd: Decimal,
     ventas_24h_bs: Decimal,
     tickets_24h: usize,
     total_productos: usize,
     valor_inventario_usd: Decimal,
+    costo_total_usd: Decimal,
+    ganancia_bruta_usd: Decimal,
+    ganancia_neta_usd: Decimal,
+    ganancia_neta_sin_imp_usd: Decimal,
+    ganancia_neta_bs: Decimal,
     criticos: Vec<CriticoDto>,
     cuentas_abiertas: usize,
+    deudas_abiertas: usize,
+    dinero_en_la_calle_usd: Decimal,
+    dinero_en_la_calle_bs: Decimal,
     top_productos: Vec<TopProductoDto>,
+    dinero_por_categoria: Vec<CategoriaDineroBrutoDto>,
 }
 
 fn decimal_de(texto: &str) -> Result<Decimal, UIError> {
@@ -1858,6 +2087,19 @@ fn registrar_venta(
         };
         let firmada = db.guardar_venta(venta)?;
 
+        // Actualizar contadores de la jornada activa
+        if let Ok(Some(mut jornada)) = db.jornada_actual() {
+            jornada.ventas_total_usd += total_usd;
+            jornada.ventas_total_bs += total_bs;
+            jornada.tickets_emitidos += 1;
+            match firmada.estado_vuelto.as_deref() {
+                Some("PAGADO") => { jornada.vuelto_pagado_bs += vuelto; }
+                Some("RETENIDO") => { jornada.vuelto_retenido_bs += vuelto; }
+                _ => {}
+            }
+            let _ = db.guardar_jornada(&jornada);
+        }
+
         Ok(armar_ticket(&firmada, recibido, vuelto))
     });
     notificar_panel(&estado);
@@ -2042,13 +2284,18 @@ fn agregar_consumo(
             .ok_or(DbError::Negocio(ErrorNegocio::ProductoInexistente))?;
         validar_linea(catalogo.capacidades(idx), cant, catalogo.stock(idx))?;
 
-        venta.lineas.agregar(
-            catalogo.sku_obj(idx),
-            catalogo.nombre_obj(idx),
-            cant,
-            catalogo.precio_usd(idx),
-            tasa,
-        );
+        let sku_obj = catalogo.sku_obj(idx);
+        if let Some(pos) = venta.lineas.skus.iter().position(|s| s == &sku_obj) {
+            venta.lineas.cantidades[pos] += cant;
+        } else {
+            venta.lineas.agregar(
+                sku_obj,
+                catalogo.nombre_obj(idx),
+                cant,
+                catalogo.precio_usd(idx),
+                tasa,
+            );
+        }
         descontar_con_lotes_interno(db, &catalogo, idx, cant, &venta.id)?;
         db.guardar_venta(venta)
     })?;
@@ -2128,7 +2375,25 @@ fn cerrar_cuenta(
         venta.monto_vuelto_usd = monto_v_usd;
         venta.tasa_vuelto = tasa_v;
         venta.fecha_cierre_unix = ahora_unix();
-        db.guardar_venta(venta)
+        let cerrada = db.guardar_venta(venta)?;
+
+        // Actualizar contadores de la jornada activa
+        if let Ok(Some(mut jornada)) = db.jornada_actual() {
+            jornada.ventas_total_usd += cierre.total_usd;
+            jornada.ventas_total_bs += cierre.total_bs;
+            jornada.tickets_emitidos += 1;
+            if cerrada.tipo == "deuda" {
+                jornada.deudas_liquidadas_usd += cierre.total_usd;
+            }
+            match cerrada.estado_vuelto.as_deref() {
+                Some("PAGADO") => { jornada.vuelto_pagado_bs += vuelto; }
+                Some("RETENIDO") => { jornada.vuelto_retenido_bs += vuelto; }
+                _ => {}
+            }
+            let _ = db.guardar_jornada(&jornada);
+        }
+
+        Ok(cerrada)
     })?;
     notificar_panel(&estado);
 
@@ -2144,6 +2409,7 @@ fn cerrar_cuenta(
 #[tauri::command]
 fn datos_panel(estado: tauri::State<AppState>) -> Result<PanelDto, UIError> {
     config_requerida(&estado)?;
+    let tasa = tasa_viva(&estado)?;
     con_ledger(&estado, |db| -> Result<PanelDto, DbError> {
         let catalogo = db.cargar_catalogo()?;
         let limite = ahora_unix() - 86_400;
@@ -2230,7 +2496,78 @@ fn datos_panel(estado: tauri::State<AppState>) -> Result<PanelDto, UIError> {
             }
         }
 
-        let abiertas = db.cuentas_abiertas()?.len();
+        let cuentas_todas = db.cuentas_abiertas()?;
+        let abiertas = cuentas_todas.len();
+
+        // Financial metrics
+        let costo_total_usd = usd * dec!(0.65);
+        let ganancia_bruta_usd = usd - costo_total_usd;
+        let impuestos_usd = usd * dec!(0.12);
+        let ganancia_neta_usd = ganancia_bruta_usd - impuestos_usd;
+        let ganancia_neta_sin_imp_usd = ganancia_bruta_usd;
+        let ganancia_neta_bs = ganancia_neta_usd * tasa;
+
+        // Deudas y dinero en la calle
+        let deudas_abiertas = cuentas_todas.iter()
+            .filter(|v| v.tipo == "deuda")
+            .count();
+        let dinero_en_la_calle_usd: Decimal = cuentas_todas.iter()
+            .filter(|v| v.tipo == "deuda")
+            .map(|v| {
+                let total = v.lineas.total_usd();
+                let abonos = v.abonos_usd.unwrap_or(Decimal::ZERO);
+                if total > abonos { total - abonos } else { Decimal::ZERO }
+            })
+            .sum();
+        let dinero_en_la_calle_bs = dinero_en_la_calle_usd * tasa;
+
+        // Dinero por categoria
+        let categorias = db.listar_categorias()?;
+        let mut mapa_cats: std::collections::HashMap<String, (usize, Decimal, Decimal, Decimal)> =
+            std::collections::HashMap::new();
+        let mut total_bruto_global: Decimal = Decimal::ZERO;
+        for i in 0..catalogo.len() {
+            let cat_id = catalogo.categoria_id(i).unwrap_or_else(|| "cat-general".to_string());
+            let entry = mapa_cats.entry(cat_id.clone()).or_insert((0, Decimal::ZERO, Decimal::ZERO, Decimal::ZERO));
+            entry.0 += 1;
+            let st = if catalogo.sin_stock(i) { Decimal::ZERO } else { catalogo.stock(i) };
+            let bruto_unit = catalogo.precio_bruto_usd(i).unwrap_or(catalogo.precio_usd(i) * dec!(0.65));
+            let venta_unit = catalogo.precio_usd(i);
+            entry.1 += st;
+            entry.2 += st * bruto_unit;
+            entry.3 += st * venta_unit;
+            total_bruto_global += st * bruto_unit;
+        }
+        let cat_nombre_map: std::collections::HashMap<String, String> = categorias.iter()
+            .map(|c| (c.id.clone(), c.nombre.clone()))
+            .collect();
+        let mut dinero_por_categoria: Vec<CategoriaDineroBrutoDto> = mapa_cats.into_iter()
+            .filter(|(_, (n, _, b, _))| *n > 0 || *b > Decimal::ZERO)
+            .map(|(cat_id, (cant_prod, unidades, bruto, venta))| {
+                let nombre = cat_nombre_map.get(&cat_id).cloned().unwrap_or_else(|| "General".to_string());
+                let margen = if venta > bruto { venta - bruto } else { Decimal::ZERO };
+                let margen_pct = if venta > Decimal::ZERO {
+                    format!("{:.1}", margen / venta * dec!(100))
+                } else { "0.0".to_string() };
+                let pct_cap = if total_bruto_global > Decimal::ZERO {
+                    format!("{:.1}", bruto / total_bruto_global * dec!(100))
+                } else { "0.0".to_string() };
+                CategoriaDineroBrutoDto {
+                    categoria_id: cat_id,
+                    nombre,
+                    cantidad_productos: cant_prod,
+                    unidades_stock: unidades,
+                    dinero_bruto_usd: bruto,
+                    dinero_bruto_bs: bruto * tasa,
+                    dinero_venta_usd: venta,
+                    dinero_venta_bs: venta * tasa,
+                    margen_bruto_proyectado_usd: margen,
+                    margen_bruto_pct: margen_pct,
+                    porcentaje_capital: pct_cap,
+                }
+            })
+            .collect();
+        dinero_por_categoria.sort_by(|a, b| b.dinero_bruto_usd.cmp(&a.dinero_bruto_usd));
 
         Ok(PanelDto {
             ventas_24h_usd: usd,
@@ -2238,9 +2575,18 @@ fn datos_panel(estado: tauri::State<AppState>) -> Result<PanelDto, UIError> {
             tickets_24h: tickets,
             valor_inventario_usd: catalogo.valor_inventario_usd(),
             total_productos: catalogo.len(),
+            costo_total_usd,
+            ganancia_bruta_usd,
+            ganancia_neta_usd,
+            ganancia_neta_sin_imp_usd,
+            ganancia_neta_bs,
             criticos,
             cuentas_abiertas: abiertas,
+            deudas_abiertas,
+            dinero_en_la_calle_usd,
+            dinero_en_la_calle_bs,
             top_productos: top,
+            dinero_por_categoria,
         })
     })
 }

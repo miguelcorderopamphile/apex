@@ -397,12 +397,12 @@
             document.getElementById('v-bsf').textContent = fmtBs(p.ventas24hBs);
             document.getElementById('v-tickets').textContent = Number(p.tickets24h).toLocaleString();
             document.getElementById('inv-valor').textContent = fmtUsd(p.valorInventarioUsd);
-            document.getElementById('inv-criticos').textContent = p.criticosLen;
+            document.getElementById('inv-criticos').textContent = p.criticos.length;
             document.getElementById('inv-total').textContent = p.totalProductos;
             const cl = document.getElementById('criticos-list');
-            if(!p.criticosLen){cl.innerHTML='<div style="text-align:center;color:var(--muted);padding:12px;">Sin criticos</div>';}
-            else{let h='';for(let i=0;i<p.criticosLen;i++){const c=p.criticos[i];h+=`<div class="row"><div><strong>${c.nombre}</strong><br><span style="font-size:11px;color:var(--muted);">${c.sku}</span></div><span class="badge badge-red">${c.stock}</span></div>`;}cl.innerHTML=h;}
-            renderTopChart(p.topProductos,p.topProductosLen);
+            if(!p.criticos.length){cl.innerHTML='<div style="text-align:center;color:var(--muted);padding:12px;">Sin criticos</div>';}
+            else{let h='';for(let i=0;i<p.criticos.length;i++){const c=p.criticos[i];h+=`<div class="row"><div><strong>${c.nombre}</strong><br><span style="font-size:11px;color:var(--muted);">${c.sku}</span></div><span class="badge badge-red">${c.stock}</span></div>`;}cl.innerHTML=h;}
+            renderTopChart(p.topProductos,p.topProductos.length);
         }
         function renderTasa(t,pend) {
             if(t&&t.valor>0){document.getElementById('tasa-valor').textContent=Number(t.valor).toFixed(2);document.getElementById('tasa-fuente').textContent=t.fuente||'BCV';
