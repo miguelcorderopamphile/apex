@@ -24,18 +24,25 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: './datiolabs-ui -> target'
+          workspaces: './ -> target'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build frontend
+        working-directory: ui
+        run: |
+          npm install
+          npx tsc
+          npx vite build
 
       - name: Install Tauri CLI
-        uses: cargo-bins/cargo-binstall@main
-
-      - name: Install Tauri CLI binary
         run: cargo binstall --no-confirm tauri-cli@^2.0.0
 
       - name: Build Tauri Windows Installer
-        run: |
-          cd datiolabs-ui
-          cargo tauri build --target x86_64-pc-windows-msvc
+        run: cargo tauri build --target x86_64-pc-windows-msvc
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
