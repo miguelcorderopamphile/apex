@@ -496,6 +496,7 @@ pub struct Categoria {
 pub struct TasaImpuesto {
     pub id: String,
     pub nombre: String,
+    #[serde(with = "rust_decimal::serde::str")]
     pub porcentaje: Decimal,
 }
 

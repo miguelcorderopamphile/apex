@@ -582,11 +582,11 @@ class MockDemoStorage {
     ventasTotalBs = 77025.00;
     // Jerarquía estricta obligatoria: Bolívares arriba (alta frecuencia), Divisas abajo
     metodosPago: MetodoPagoConfig[] = [
-        { nombre: 'PUNTOD.VENTA', moneda: 'BS' },
         { nombre: 'BIOPAGO', moneda: 'BS' },
         { nombre: 'PAGO MOVIL', moneda: 'BS' },
         { nombre: 'TRANSF.BS.', moneda: 'BS' },
         { nombre: 'BS.EFEC.', moneda: 'BS' },
+        { nombre: 'PUNTOD.VENTA', moneda: 'BS' },
         { nombre: 'DOL.CASH', moneda: 'USD' },
         { nombre: 'ZELLE', moneda: 'USD' },
         { nombre: 'BINAN.USDT', moneda: 'USD' },

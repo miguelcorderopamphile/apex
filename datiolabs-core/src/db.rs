@@ -5,6 +5,7 @@ use crate::models::{
 };
 use crate::modulos::panaderia::{LibroLotes, Lote};
 use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sled::Db;
@@ -98,7 +99,24 @@ pub struct Database {
 impl Database {
     pub fn abrir(path: &str) -> Result<Self, DbError> {
         let db = sled::open(path)?;
-        Ok(Self { db: Arc::new(db) })
+        let ledger = Self { db: Arc::new(db) };
+        ledger.semilla_si_vacia()?;
+        Ok(ledger)
+    }
+
+    fn semilla_si_vacia(&self) -> Result<(), DbError> {
+        let tree = self.db.open_tree(ARBOL_TASAS_IMPUESTOS)?;
+        if tree.is_empty() {
+            let defaults = vec![
+                TasaImpuesto { id: "IVA-0".into(), nombre: "Exento".into(), porcentaje: Decimal::ZERO },
+                TasaImpuesto { id: "IVA-16".into(), nombre: "Regular (16%)".into(), porcentaje: dec!(16) },
+                TasaImpuesto { id: "IVA-8".into(), nombre: "Bajo (8%)".into(), porcentaje: dec!(8) },
+            ];
+            for t in &defaults {
+                tree.insert(t.id.as_bytes(), bincode::serialize(t)?)?;
+            }
+        }
+        Ok(())
     }
 
     pub fn inner_db(&self) -> Arc<Db> {

@@ -742,6 +742,9 @@ async fn api_cuentas_abonar(
     let mut venta = db.cargar_venta(&id).ok().flatten()
         .filter(|v| v.es_cuenta_abierta && v.estado == datiolabs_core::models::EstadoVenta::Abierta)
         .ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
+    if venta.lineas.skus.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "No se puede abonar a una cuenta sin productos".to_string()));
+    }
     let usd_d = rust_decimal::Decimal::try_from(usd).unwrap_or(rust_decimal::Decimal::ZERO);
     let bs_d = rust_decimal::Decimal::try_from(bs).unwrap_or(rust_decimal::Decimal::ZERO);
     venta.abonos_usd = Some(venta.abonos_usd.unwrap_or(rust_decimal::Decimal::ZERO) + usd_d);

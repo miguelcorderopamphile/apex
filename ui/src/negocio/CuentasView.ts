@@ -726,7 +726,7 @@ export class CuentasView {
         const pendienteBs = (pendienteUsd * tasaOficial).toFixed(2);
         const esDeuda = this.cuentaSeleccionada.tipo === "deuda";
 
-        let metodoSeleccionado = metodosDisponibles[0] || { nombre: 'PUNTOD.VENTA', moneda: 'BS' as const };
+        let metodoSeleccionado = metodosDisponibles.find((m) => m.nombre === 'BIOPAGO') || metodosDisponibles[0] || { nombre: 'BIOPAGO', moneda: 'BS' as const };
         let montoInput = metodoSeleccionado.moneda === 'USD' ? pendienteUsd : Number(pendienteBs);
         let tasaMetodo = tasaOficial;
         let referencia = "";

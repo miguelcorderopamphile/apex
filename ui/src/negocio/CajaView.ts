@@ -396,10 +396,10 @@ export class CajaView {
             referencia: string;
         }
 
-        const defMetodo = metodosDisponibles.find((m) => m.nombre === 'PUNTOD.VENTA') ||
+        const defMetodo = metodosDisponibles.find((m) => m.nombre === 'BIOPAGO') ||
             metodosDisponibles.find((m) => m.moneda === 'BS') ||
             metodosDisponibles[0] ||
-            { nombre: 'PUNTOD.VENTA', moneda: 'BS' as const };
+            { nombre: 'BIOPAGO', moneda: 'BS' as const };
         let lineasCobro: LineaCobro[];
         if (this.pagosBorrador && this.pagosBorrador.length > 0) {
             lineasCobro = this.pagosBorrador.map((p) => ({ ...p }));
