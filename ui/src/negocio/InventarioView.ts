@@ -817,11 +817,17 @@ export class InventarioView {
         });
 
         box.querySelectorAll('[data-repo-del]').forEach((btn) => {
-
-            btn.addEventListener('click', () => {
+            btn.addEventListener('click', async () => {
                 const sku = (btn as HTMLElement).dataset.repoDel;
                 const prod = this.productos.find((x) => x.sku === sku);
                 if (!sku || !prod) return;
+                if (!this.duenoAutenticado && this.modelo.hasPinSet()) {
+                    const pin = window.prompt('Acción protegida. Ingrese el PIN de Administrador / Dueño:');
+                    if (!pin || !await this.modelo.verificarPin(pin)) {
+                        alert('PIN incorrecto o no suministrado. Acción cancelada.');
+                        return;
+                    }
+                }
                 const confirmar = window.confirm(`¿Seguro que deseas eliminar permanentemente el producto "${prod.nombre}" del catálogo?`);
                 if (confirmar) {
                     void api.eliminarProducto(sku).then(() => {
@@ -838,12 +844,18 @@ export class InventarioView {
         });
 
         box.querySelectorAll('[data-repo-in]').forEach((btn) => {
-            btn.addEventListener('click', () => {
+            btn.addEventListener('click', async () => {
                 const sku = (btn as HTMLElement).dataset.repoIn;
                 const inp = box.querySelector<HTMLInputElement>(`input[data-repo-cant="${sku}"]`);
                 const cant = inp?.value;
                 if (sku && cant && Number(cant) > 0 && Number(cant) <= 9999) {
-                    // Check if replenishment is by box or unit
+                    if (!this.duenoAutenticado && this.modelo.hasPinSet()) {
+                        const pin = window.prompt('Acción de inventario protegida. Ingrese el PIN de Administrador / Dueño:');
+                        if (!pin || !await this.modelo.verificarPin(pin)) {
+                            alert('PIN incorrecto o no suministrado. Operación cancelada.');
+                            return;
+                        }
+                    }
                     const tipoSelect = box.querySelector<HTMLSelectElement>(`select[data-repo-tipo="${sku}"]`);
                     const tipo = tipoSelect?.value || 'unidad';
                     const prod = this.productos.find((p) => p.sku === sku);
@@ -863,12 +875,18 @@ export class InventarioView {
         });
 
         box.querySelectorAll('[data-repo-red]').forEach((btn) => {
-            btn.addEventListener('click', () => {
+            btn.addEventListener('click', async () => {
                 const sku = (btn as HTMLElement).dataset.repoRed;
                 const inp = box.querySelector<HTMLInputElement>(`input[data-repo-cant="${sku}"]`);
                 const cant = inp?.value;
                 if (sku && cant && Number(cant) > 0 && Number(cant) <= 9999) {
-                    // Check if reduction is by box or unit
+                    if (!this.duenoAutenticado && this.modelo.hasPinSet()) {
+                        const pin = window.prompt('Acción de inventario protegida. Ingrese el PIN de Administrador / Dueño:');
+                        if (!pin || !await this.modelo.verificarPin(pin)) {
+                            alert('PIN incorrecto o no suministrado. Operación cancelada.');
+                            return;
+                        }
+                    }
                     const tipoSelect = box.querySelector<HTMLSelectElement>(`select[data-repo-tipo="${sku}"]`);
                     const tipo = tipoSelect?.value || 'unidad';
                     const prod = this.productos.find((p) => p.sku === sku);
@@ -888,12 +906,18 @@ export class InventarioView {
         });
 
         box.querySelectorAll('[data-repo-out]').forEach((btn) => {
-            btn.addEventListener('click', () => {
+            btn.addEventListener('click', async () => {
                 const sku = (btn as HTMLElement).dataset.repoOut;
                 const inp = box.querySelector<HTMLInputElement>(`input[data-repo-cant="${sku}"]`);
                 const cant = inp?.value;
                 if (sku && cant && Number(cant) > 0 && Number(cant) <= 9999) {
-                    // Check if merma is by box or unit
+                    if (!this.duenoAutenticado && this.modelo.hasPinSet()) {
+                        const pin = window.prompt('Acción de inventario protegida. Ingrese el PIN de Administrador / Dueño:');
+                        if (!pin || !await this.modelo.verificarPin(pin)) {
+                            alert('PIN incorrecto o no suministrado. Operación cancelada.');
+                            return;
+                        }
+                    }
                     const tipoSelect = box.querySelector<HTMLSelectElement>(`select[data-repo-tipo="${sku}"]`);
                     const tipo = tipoSelect?.value || 'unidad';
                     const prod = this.productos.find((p) => p.sku === sku);

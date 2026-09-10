@@ -717,6 +717,7 @@ async fn api_cuentas_consumo(
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let sku = body.get("sku").cloned().unwrap_or_default();
     let cantidad = body.get("cantidad").cloned().unwrap_or_else(|| "1".to_string());
+    let modo = body.get("modo_venta").cloned().unwrap_or_else(|| "unidad".to_string());
     let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let mut venta = db.cargar_venta(&id).ok().flatten()
         .filter(|v| v.es_cuenta_abierta && v.estado == datiolabs_core::models::EstadoVenta::Abierta)
@@ -724,19 +725,29 @@ async fn api_cuentas_consumo(
     let catalogo = db.cargar_catalogo().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let idx = catalogo.indice_de(&sku).ok_or((StatusCode::BAD_REQUEST, "SKU inválido".to_string()))?;
     let cant: rust_decimal::Decimal = cantidad.parse().map_err(|e| (StatusCode::BAD_REQUEST, format!("Cantidad inválida: {e}")))?;
-    validar_linea(catalogo.capacidades(idx), cant, catalogo.stock(idx))
+    let cant_unidades = if modo == "paquete" && catalogo.es_caja(idx) {
+        cant * rust_decimal::Decimal::from(catalogo.unidades_por_caja(idx).unwrap_or(1))
+    } else {
+        cant
+    };
+    validar_linea(catalogo.capacidades(idx), cant_unidades, catalogo.stock(idx))
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("{e}")))?;
     let tasa = state.servicio_tasa.info_actual().valor;
     let sku_obj = catalogo.sku_obj(idx);
+    let precio_efectivo = if modo == "paquete" {
+        catalogo.precio_paquete_usd(idx).unwrap_or(catalogo.precio_usd(idx))
+    } else {
+        catalogo.precio_usd(idx)
+    };
     if let Some(pos) = venta.lineas.skus.iter().position(|s| s == &sku_obj) {
         venta.lineas.cantidades[pos] += cant;
     } else {
         venta.lineas.agregar(
             sku_obj, catalogo.nombre_obj(idx),
-            cant, catalogo.precio_usd(idx), tasa, "unidad".to_string(),
+            cant, precio_efectivo, tasa, modo.clone(),
         );
     }
-    descontar_con_lotes_interno(&*db, &catalogo, idx, cant, &venta.id)
+    descontar_con_lotes_interno(&*db, &catalogo, idx, cant, &venta.id, &modo)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     db.guardar_venta(venta).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     drop(db);
@@ -1018,6 +1029,9 @@ async fn api_ventas_registrar(
     let items = body.get("items").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     if items.is_empty() { return Err((StatusCode::BAD_REQUEST, "Solicitud inválida".to_string())); }
     let tasa = state.servicio_tasa.info_actual().valor;
+    if tasa <= rust_decimal::Decimal::ZERO {
+        return Err((StatusCode::BAD_REQUEST, "Tasa de cambio no disponible o inválida".to_string()));
+    }
     let monto_recibido_bs: rust_decimal::Decimal = body.get("montoRecibidoBs")
         .and_then(|v| v.as_str()).and_then(|s| s.parse().ok())
         .unwrap_or(rust_decimal::Decimal::ZERO);
@@ -1027,16 +1041,21 @@ async fn api_ventas_registrar(
 
     // Validate stock and build lineas
     let mut lineas = datiolabs_core::models::LineasVenta::nuevas();
-    let mut toques: Vec<(usize, rust_decimal::Decimal)> = Vec::with_capacity(items.len());
+    let mut toques: Vec<(usize, rust_decimal::Decimal, String)> = Vec::with_capacity(items.len());
     for item in &items {
         let sku_str = item.get("sku").and_then(|v| v.as_str()).unwrap_or("");
         let cant: rust_decimal::Decimal = item.get("cantidad").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or(rust_decimal::Decimal::ONE);
         let modo = item.get("modo_venta").and_then(|v| v.as_str()).unwrap_or("unidad");
         let idx = catalogo.indice_de(sku_str)
             .ok_or((StatusCode::BAD_REQUEST, format!("SKU inexistente: {sku_str}")))?;
-        validar_linea(catalogo.capacidades(idx), cant, catalogo.stock(idx))
+        let cant_unidades = if modo == "paquete" && catalogo.es_caja(idx) {
+            cant * rust_decimal::Decimal::from(catalogo.unidades_por_caja(idx).unwrap_or(1))
+        } else {
+            cant
+        };
+        validar_linea(catalogo.capacidades(idx), cant_unidades, catalogo.stock(idx))
             .map_err(|e| (StatusCode::BAD_REQUEST, format!("{e}")))?;
-        toques.push((idx, cant));
+        toques.push((idx, cant, modo.to_string()));
         let precio_efectivo = if modo == "paquete" {
             catalogo.precio_paquete_usd(idx).unwrap_or(catalogo.precio_usd(idx))
         } else {
@@ -1047,7 +1066,8 @@ async fn api_ventas_registrar(
 
     let total_usd = lineas.total_usd();
     let total_bs = lineas.total_bs();
-    if monto_recibido_bs > rust_decimal::Decimal::ZERO && monto_recibido_bs < total_bs {
+    let epsilon = rust_decimal::Decimal::from_str("0.01").unwrap_or(rust_decimal::Decimal::ZERO);
+    if monto_recibido_bs > rust_decimal::Decimal::ZERO && (monto_recibido_bs + epsilon) < total_bs {
         return Err((StatusCode::BAD_REQUEST, "El pago recibido no cubre el total en bolivares".to_string()));
     }
     let vuelto = if monto_recibido_bs > rust_decimal::Decimal::ZERO {
@@ -1090,8 +1110,8 @@ async fn api_ventas_registrar(
 
     // Deduct stock
     let venta_id = uuid::Uuid::new_v4().to_string();
-    for (idx, cantidad) in &toques {
-        descontar_con_lotes_interno(&*db, &catalogo, *idx, *cantidad, &venta_id)
+    for (idx, cantidad, modo) in &toques {
+        descontar_con_lotes_interno(&*db, &catalogo, *idx, *cantidad, &venta_id, modo)
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     }
 
@@ -1275,8 +1295,27 @@ async fn api_jornadas_cerrar(State(state): State<AxumAppState>) -> Result<Json<s
     let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
     let mut jornada = db.jornada_actual().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?
         .ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
+    
+    let ahora = ahora_unix();
+    if let Ok(ventas) = db.consultar_ventas_rango(jornada.inicio_unix, ahora) {
+        let mut tot_usd = rust_decimal::Decimal::ZERO;
+        let mut tot_bs = rust_decimal::Decimal::ZERO;
+        let mut v_pagado = rust_decimal::Decimal::ZERO;
+        let mut tickets = 0u32;
+        for v in ventas {
+            tot_usd += v.total_usd;
+            tot_bs += v.total_bs;
+            v_pagado += v.vuelto_bs;
+            tickets += 1;
+        }
+        jornada.ventas_total_usd = tot_usd;
+        jornada.ventas_total_bs = tot_bs;
+        jornada.vuelto_pagado_bs = v_pagado;
+        jornada.tickets_emitidos = tickets;
+    }
+
     jornada.estado = "cerrada".to_string();
-    jornada.fin_unix = Some(ahora_unix());
+    jornada.fin_unix = Some(ahora);
     jornada.tasa_fin = Some(tasa);
     let checksum = format!("{:x}", sha2::Sha256::digest(jornada.id.as_bytes()));
     jornada.checksum_sha256 = Some(checksum);
@@ -1951,9 +1990,10 @@ fn descontar_con_lotes_interno(
     idx: usize,
     cantidad: Decimal,
     venta_id: &str,
+    modo_venta: &str,
 ) -> Result<(), DbError> {
     let mut unidades = cantidad;
-    if catalogo.es_caja(idx) {
+    if modo_venta == "paquete" && catalogo.es_caja(idx) {
         if let Some(upc) = catalogo.unidades_por_caja(idx) {
             if upc > 0 {
                 unidades = cantidad * Decimal::from(upc);
@@ -2344,15 +2384,20 @@ fn registrar_venta(
     let resultado = con_ledger(&estado, |db| {
         let catalogo = catalogo_fresco(db)?;
         let mut lineas = LineasVenta::nuevas();
-        let mut toques: Vec<(usize, Decimal)> = Vec::with_capacity(items.len());
+        let mut toques: Vec<(usize, Decimal, String)> = Vec::with_capacity(items.len());
         for item in &items {
             let idx = catalogo
                 .indice_de(item.sku.trim().to_uppercase().as_str())
                 .ok_or(DbError::Negocio(ErrorNegocio::ProductoInexistente))?;
             let cantidad = decimal_de(&item.cantidad)?;
             let modo = item.modo_venta.as_deref().unwrap_or("unidad");
-            validar_linea(catalogo.capacidades(idx), cantidad, catalogo.stock(idx))?;
-            toques.push((idx, cantidad));
+            let cant_unidades = if modo == "paquete" && catalogo.es_caja(idx) {
+                cantidad * Decimal::from(catalogo.unidades_por_caja(idx).unwrap_or(1))
+            } else {
+                cantidad
+            };
+            validar_linea(catalogo.capacidades(idx), cant_unidades, catalogo.stock(idx))?;
+            toques.push((idx, cantidad, modo.to_string()));
             let precio_efectivo = if modo == "paquete" {
                 match catalogo.precio_paquete_usd(idx) {
                     Some(p) => p,
@@ -2422,8 +2467,8 @@ fn registrar_venta(
         };
 
         let venta_id = Uuid::new_v4().to_string();
-        for (idx, cantidad) in &toques {
-            descontar_con_lotes_interno(db, &catalogo, *idx, *cantidad, &venta_id)?;
+        for (idx, cantidad, modo) in &toques {
+            descontar_con_lotes_interno(db, &catalogo, *idx, *cantidad, &venta_id, modo)?;
         }
 
         let venta = Venta {
@@ -2661,7 +2706,12 @@ fn agregar_consumo(
         let idx = catalogo
             .indice_de(sku.trim().to_uppercase().as_str())
             .ok_or(DbError::Negocio(ErrorNegocio::ProductoInexistente))?;
-        validar_linea(catalogo.capacidades(idx), cant, catalogo.stock(idx))?;
+        let cant_unidades = if modo == "paquete" && catalogo.es_caja(idx) {
+            cant * Decimal::from(catalogo.unidades_por_caja(idx).unwrap_or(1))
+        } else {
+            cant
+        };
+        validar_linea(catalogo.capacidades(idx), cant_unidades, catalogo.stock(idx))?;
 
         let sku_obj = catalogo.sku_obj(idx);
         let precio_efectivo = if modo == "paquete" {
@@ -2684,10 +2734,10 @@ fn agregar_consumo(
                 cant,
                 precio_efectivo,
                 tasa,
-                modo,
+                modo.clone(),
             );
         }
-        descontar_con_lotes_interno(db, &catalogo, idx, cant, &venta.id)?;
+        descontar_con_lotes_interno(db, &catalogo, idx, cant, &venta.id, &modo)?;
         db.guardar_venta(venta)
     })?;
     notificar_panel(&estado);
@@ -3343,10 +3393,11 @@ fn auto_backup(
 
 #[tauri::command]
 fn get_backup_dir() -> Result<String, UIError> {
-    let dir = dirs::data_dir()
-        .unwrap_or_else(|| std::env::temp_dir())
-        .join("DatioLabs")
-        .join("backups");
+    let base_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+    let dir = base_dir.join("Respaldos");
     std::fs::create_dir_all(&dir).map_err(|e| UIError::new("error creando directorio de respaldos", &e.to_string()))?;
     Ok(dir.to_string_lossy().to_string())
 }

@@ -63,6 +63,14 @@ export class NegocioModel {
         const v = Number(usd) * this.tasa;
         return v.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
+
+    hasPinSet(): boolean {
+        return Boolean(this.config?.tienePin);
+    }
+
+    async verificarPin(pin: string): Promise<boolean> {
+        return api.validarPin(pin);
+    }
 }
 
 export { RUBRO_ABASTO, RUBRO_PANADERIA, RUBRO_LICORERIA, RUBRO_RETAIL };
