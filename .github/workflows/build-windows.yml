@@ -39,7 +39,14 @@ jobs:
           npx vite build
 
       - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2.0.0"
+        uses: cargo-bins/cargo-binstall@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Tauri CLI binary
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: cargo binstall --no-confirm tauri-cli@^2.0.0
 
       - name: Build Tauri Windows Installer
         run: |
