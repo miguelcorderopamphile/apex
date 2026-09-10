@@ -21,6 +21,7 @@ datiolabs_db/
 .env
 .env.*
 !.env.template
+.env.local
 
 # Node / Frontend
 node_modules/
