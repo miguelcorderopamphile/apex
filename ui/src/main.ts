@@ -706,29 +706,8 @@ class AppController {
             if (this.offerResendTimer) { clearInterval(this.offerResendTimer); this.offerResendTimer = null; }
             this.p2pConnected = true;
             (window as any).__DATACHANNEL__ = this.dataChannel;
-            this.actualizarEstadoP2P('connected', 'DataChannel abierto - Autenticando...');
-            try {
-                const pin = this.p2pPin || '';
-                if (pin) {
-                    const loginRes = await fetch(`http://localhost:${SERVER_PORT}/api/auth/login`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ pin }),
-                    });
-                    if (loginRes.ok) {
-                        const setCookie = loginRes.headers.get('set-cookie');
-                        if (setCookie) {
-                            const match = setCookie.match(/datiolabs_session=[a-zA-Z0-9]{32}/);
-                            if (match) this.p2pSessionCookie = match[0];
-                        }
-                    }
-                }
-                this.actualizarEstadoP2P('connected', 'DataChannel listo - Dispositivo movil vinculado');
-                this.iniciarKeepalive();
-            } catch (_) {
-                this.actualizarEstadoP2P('connected', 'DataChannel abierto - Dispositivo movil vinculado');
-                this.iniciarKeepalive();
-            }
+            this.actualizarEstadoP2P('connected', 'DataChannel abierto - Dispositivo movil vinculado');
+            this.iniciarKeepalive();
         };
         this.dataChannel.onclose = () => {
             this.p2pConnected = false;
@@ -775,8 +754,6 @@ class AppController {
             }
         }, 5000);
     }
-
-    private p2pSessionCookie: string = '';
 
     private async handleDataChannelMessage(data: string): Promise<void> {
         try {
@@ -853,13 +830,11 @@ class AppController {
             }
 
             try {
-                const opts: RequestInit = { method: httpMethod };
+                const opts: RequestInit = { method: httpMethod, credentials: 'include' };
                 if (httpBody) opts.body = typeof httpBody === 'string' ? httpBody : JSON.stringify(httpBody);
                 const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-                if (this.p2pSessionCookie) {
-                    headers['Cookie'] = this.p2pSessionCookie;
-                }
-                const res = await fetch(`http://localhost:${SERVER_PORT}${httpPath}`, {
+                const origin = window.location.origin;
+                const res = await fetch(`${origin}${httpPath}`, {
                     ...opts,
                     headers,
                 });
@@ -970,7 +945,6 @@ class AppController {
         this.detenerKeepalive();
         this.limpiarPeerConnection();
         if (this.wsSignaling) { this.wsSignaling.close(); this.wsSignaling = null; }
-        this.p2pSessionCookie = '';
         this.p2pConnected = false;
         this.signalingRetries = 0;
         this.reconectando = false;

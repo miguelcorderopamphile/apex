@@ -4160,7 +4160,6 @@ pub fn run() {
                     .route("/api/semaforo", get(api_semaforo_obtener))
                     .route("/api/semaforo", post(api_semaforo_guardar))
                     .route("/api/pin/cambiar", post(api_pin_cambiar))
-                    .route("/api/config", get(api_config))
                     .route("/api/config/privacidad", post(api_config_privacidad))
                     .route("/api/respaldos", get(api_respaldos_listar))
                     .route("/api/respaldos", post(api_respaldos_crear))
@@ -4181,6 +4180,7 @@ pub fn run() {
                     .route("/panel", get(serve_panel_html))
                     .route("/bootstrap", get(serve_bootstrap_html))
                     .route("/api/spa", get(api_spa_content))
+                    .route("/api/config", get(api_config))
                     .fallback_service(ServeDir::new(spa_dist_path).append_index_html_on_directories(false));
 
                 let app = Router::new()
