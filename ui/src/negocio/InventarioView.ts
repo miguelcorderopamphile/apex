@@ -613,9 +613,23 @@ export class InventarioView {
         });
 
         this.contenedor.querySelectorAll('[data-del-cat]').forEach((btn) => {
-            btn.addEventListener('click', () => {
+            btn.addEventListener('click', async () => {
                 const id = (btn as HTMLElement).dataset.delCat;
-                if (id) void api.eliminarCategoria(id).then(() => void this.render('ajustes'));
+                if (!id) return;
+                const privacidad = this.modelo.getConfig()?.privacidadInventario;
+                if (privacidad && !this.duenoAutenticado) {
+                    alert('Acción no permitida en modo operador. Solicite al dueño.');
+                    return;
+                }
+                if (!this.duenoAutenticado && this.modelo.hasPinSet()) {
+                    const pin = window.prompt('Acción protegida. Ingrese el PIN de Administrador / Dueño:');
+                    if (!pin || !await this.modelo.verificarPin(pin)) {
+                        alert('PIN incorrecto o no suministrado. Acción cancelada.');
+                        return;
+                    }
+                }
+                if (!window.confirm('¿Seguro que desea eliminar esta categoría? Los productos asociados quedarán sin categoría.')) return;
+                void api.eliminarCategoria(id).then(() => void this.render('ajustes'));
             });
         });
 
@@ -821,6 +835,11 @@ export class InventarioView {
                 const sku = (btn as HTMLElement).dataset.repoDel;
                 const prod = this.productos.find((x) => x.sku === sku);
                 if (!sku || !prod) return;
+                const privacidad = this.modelo.getConfig()?.privacidadInventario;
+                if (privacidad && !this.duenoAutenticado) {
+                    alert('Acción no permitida en modo operador. Solicite al dueño.');
+                    return;
+                }
                 if (!this.duenoAutenticado && this.modelo.hasPinSet()) {
                     const pin = window.prompt('Acción protegida. Ingrese el PIN de Administrador / Dueño:');
                     if (!pin || !await this.modelo.verificarPin(pin)) {
@@ -849,6 +868,11 @@ export class InventarioView {
                 const inp = box.querySelector<HTMLInputElement>(`input[data-repo-cant="${sku}"]`);
                 const cant = inp?.value;
                 if (sku && cant && Number(cant) > 0 && Number(cant) <= 9999) {
+                    const privacidad = this.modelo.getConfig()?.privacidadInventario;
+                    if (privacidad && !this.duenoAutenticado) {
+                        alert('Acción no permitida en modo operador. Solicite al dueño.');
+                        return;
+                    }
                     if (!this.duenoAutenticado && this.modelo.hasPinSet()) {
                         const pin = window.prompt('Acción de inventario protegida. Ingrese el PIN de Administrador / Dueño:');
                         if (!pin || !await this.modelo.verificarPin(pin)) {
@@ -880,6 +904,11 @@ export class InventarioView {
                 const inp = box.querySelector<HTMLInputElement>(`input[data-repo-cant="${sku}"]`);
                 const cant = inp?.value;
                 if (sku && cant && Number(cant) > 0 && Number(cant) <= 9999) {
+                    const privacidad = this.modelo.getConfig()?.privacidadInventario;
+                    if (privacidad && !this.duenoAutenticado) {
+                        alert('Acción no permitida en modo operador. Solicite al dueño.');
+                        return;
+                    }
                     if (!this.duenoAutenticado && this.modelo.hasPinSet()) {
                         const pin = window.prompt('Acción de inventario protegida. Ingrese el PIN de Administrador / Dueño:');
                         if (!pin || !await this.modelo.verificarPin(pin)) {
@@ -911,6 +940,11 @@ export class InventarioView {
                 const inp = box.querySelector<HTMLInputElement>(`input[data-repo-cant="${sku}"]`);
                 const cant = inp?.value;
                 if (sku && cant && Number(cant) > 0 && Number(cant) <= 9999) {
+                    const privacidad = this.modelo.getConfig()?.privacidadInventario;
+                    if (privacidad && !this.duenoAutenticado) {
+                        alert('Acción no permitida en modo operador. Solicite al dueño.');
+                        return;
+                    }
                     if (!this.duenoAutenticado && this.modelo.hasPinSet()) {
                         const pin = window.prompt('Acción de inventario protegida. Ingrese el PIN de Administrador / Dueño:');
                         if (!pin || !await this.modelo.verificarPin(pin)) {

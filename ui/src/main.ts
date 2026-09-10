@@ -131,54 +131,56 @@ class AppController {
                         }
                     };
 
-                    const dc = pc.createDataChannel('api', { ordered: true });
+                    pc.ondatachannel = (event) => {
+                        const dc = event.channel;
 
-                    dc.onopen = () => {
-                        (window as any).__DATACHANNEL__ = dc;
-                        (window as any).__DATACHANNEL_WS__ = ws;
-                        const ss = document.getElementById('movil-status');
-                        if (ss) ss.textContent = 'Conexion P2P lista!';
-                        try {
+                        dc.onopen = () => {
+                            (window as any).__DATACHANNEL__ = dc;
+                            (window as any).__DATACHANNEL_WS__ = ws;
+                            const ss = document.getElementById('movil-status');
+                            if (ss) ss.textContent = 'Conexion P2P lista!';
+                            try {
+                                this.root.innerHTML = `
+                                <div class="flex flex-col items-center justify-center h-screen bg-gray-50">
+                                    <div class="text-center">
+                                        <div class="w-12 h-12 border-4 border-green-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                                        <h2 class="font-heading font-black text-xl text-green-700">CONECTADO</h2>
+                                        <p class="text-sm text-gray-500 mt-2">Cargando datos del negocio...</p>
+                                    </div>
+                                </div>`;
+                                void this.cargarConfigMovil();
+                            } catch (_) {}
+                        };
+
+                        dc.onclose = () => {
+                            delete (window as any).__DATACHANNEL__;
                             this.root.innerHTML = `
                             <div class="flex flex-col items-center justify-center h-screen bg-gray-50">
                                 <div class="text-center">
-                                    <div class="w-12 h-12 border-4 border-green-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                                    <h2 class="font-heading font-black text-xl text-green-700">CONECTADO</h2>
-                                    <p class="text-sm text-gray-500 mt-2">Cargando datos del negocio...</p>
+                                    <div class="w-12 h-12 border-4 border-red-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+                                    <h2 class="font-heading font-black text-xl text-red-700">DESCONECTADO</h2>
+                                    <p class="text-sm text-gray-500 mt-2">La conexion P2P se ha perdido. Recargue la pagina.</p>
+                                    <button onclick="location.reload()" class="mt-4 bg-brand-black text-white px-4 py-2 rounded font-heading font-black text-sm">RECONECTAR</button>
                                 </div>
                             </div>`;
-                            void this.cargarConfigMovil();
-                        } catch (_) {}
-                    };
+                        };
 
-                    dc.onclose = () => {
-                        delete (window as any).__DATACHANNEL__;
-                        this.root.innerHTML = `
-                        <div class="flex flex-col items-center justify-center h-screen bg-gray-50">
-                            <div class="text-center">
-                                <div class="w-12 h-12 border-4 border-red-500 border-t-transparent rounded-full mx-auto mb-4"></div>
-                                <h2 class="font-heading font-black text-xl text-red-700">DESCONECTADO</h2>
-                                <p class="text-sm text-gray-500 mt-2">La conexion P2P se ha perdido. Recargue la pagina.</p>
-                                <button onclick="location.reload()" class="mt-4 bg-brand-black text-white px-4 py-2 rounded font-heading font-black text-sm">RECONECTAR</button>
-                            </div>
-                        </div>`;
-                    };
-
-                    dc.onmessage = (e) => {
-                        try {
-                            const resp = JSON.parse(e.data);
-                            if (resp.type === 'ping') {
-                                try { dc.send(JSON.stringify({ type: 'pong', ts: resp.ts })); } catch (_) {}
-                                return;
-                            }
-                            const pending = (window as any).__P2P_PENDING__;
-                            if (pending && resp.id && pending.has(resp.id)) {
-                                const p = pending.get(resp.id);
-                                pending.delete(resp.id);
-                                if (resp.error) { p.reject(new Error(resp.error)); }
-                                else { p.resolve(resp.body); }
-                            }
-                        } catch (_) {}
+                        dc.onmessage = (e) => {
+                            try {
+                                const resp = JSON.parse(e.data);
+                                if (resp.type === 'ping') {
+                                    try { dc.send(JSON.stringify({ type: 'pong', ts: resp.ts })); } catch (_) {}
+                                    return;
+                                }
+                                const pending = (window as any).__P2P_PENDING__;
+                                if (pending && resp.id && pending.has(resp.id)) {
+                                    const p = pending.get(resp.id);
+                                    pending.delete(resp.id);
+                                    if (resp.error) { p.reject(new Error(resp.error)); }
+                                    else { p.resolve(resp.body); }
+                                }
+                            } catch (_) {}
+                        };
                     };
 
                     await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));

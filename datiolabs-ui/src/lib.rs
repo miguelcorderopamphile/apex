@@ -1048,7 +1048,9 @@ async fn api_ventas_registrar(
         let modo = item.get("modo_venta").and_then(|v| v.as_str()).unwrap_or("unidad");
         let idx = catalogo.indice_de(sku_str)
             .ok_or((StatusCode::BAD_REQUEST, format!("SKU inexistente: {sku_str}")))?;
-        let cant_unidades = if modo == "paquete" && catalogo.es_caja(idx) {
+        let tiene_paquete = catalogo.precio_paquete_usd(idx).is_some()
+            || (catalogo.es_caja(idx) && catalogo.unidades_por_caja(idx).unwrap_or(0) > 1);
+        let cant_unidades = if modo == "paquete" && tiene_paquete {
             cant * rust_decimal::Decimal::from(catalogo.unidades_por_caja(idx).unwrap_or(1))
         } else {
             cant
@@ -1056,7 +1058,7 @@ async fn api_ventas_registrar(
         validar_linea(catalogo.capacidades(idx), cant_unidades, catalogo.stock(idx))
             .map_err(|e| (StatusCode::BAD_REQUEST, format!("{e}")))?;
         toques.push((idx, cant, modo.to_string()));
-        let precio_efectivo = if modo == "paquete" {
+        let precio_efectivo = if modo == "paquete" && tiene_paquete {
             catalogo.precio_paquete_usd(idx).unwrap_or(catalogo.precio_usd(idx))
         } else {
             catalogo.precio_usd(idx)
@@ -2391,14 +2393,16 @@ fn registrar_venta(
                 .ok_or(DbError::Negocio(ErrorNegocio::ProductoInexistente))?;
             let cantidad = decimal_de(&item.cantidad)?;
             let modo = item.modo_venta.as_deref().unwrap_or("unidad");
-            let cant_unidades = if modo == "paquete" && catalogo.es_caja(idx) {
+            let tiene_paquete = catalogo.precio_paquete_usd(idx).is_some()
+                || (catalogo.es_caja(idx) && catalogo.unidades_por_caja(idx).unwrap_or(0) > 1);
+            let cant_unidades = if modo == "paquete" && tiene_paquete {
                 cantidad * Decimal::from(catalogo.unidades_por_caja(idx).unwrap_or(1))
             } else {
                 cantidad
             };
             validar_linea(catalogo.capacidades(idx), cant_unidades, catalogo.stock(idx))?;
             toques.push((idx, cantidad, modo.to_string()));
-            let precio_efectivo = if modo == "paquete" {
+            let precio_efectivo = if modo == "paquete" && tiene_paquete {
                 match catalogo.precio_paquete_usd(idx) {
                     Some(p) => p,
                     None => {

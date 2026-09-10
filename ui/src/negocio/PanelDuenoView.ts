@@ -777,7 +777,22 @@ export class PanelDuenoView {
 
         document.getElementById('btn-crear-backup')?.addEventListener('click', async () => {
             await api.crearRespaldo();
-            await this.render();
+            this.respaldos = await api.respaldos();
+            const lista = document.getElementById('lista-respaldos');
+            if (lista) {
+                lista.innerHTML = this.respaldos.map((b) => `
+                    <div class="border border-brand-black rounded p-2.5 bg-gray-50 flex justify-between items-center text-xs">
+                        <div class="min-w-0 pr-2">
+                            <p class="font-mono font-black text-brand-black truncate text-[11px]">Respaldos/${b.archivoNombre || `${b.id}.backup`}</p>
+                            <p class="text-[10px] text-gray-500 font-mono truncate max-w-[260px]" title="${b.checksumSha256}">SHA: ${b.checksumSha256.slice(0, 16)}... · ${b.fecha}</p>
+                        </div>
+                        <div class="text-right shrink-0">
+                            <span class="font-bold text-gray-600 text-[11px]">${b.registros} reg. (${b.tamanoKb} KB)</span>
+                            <p class="text-[10px] text-green-700 font-black uppercase">Verificado OK</p>
+                        </div>
+                    </div>
+                `).join('');
+            }
         });
 
         // Eventos y renderizado de Jornada Laboral y Operadores

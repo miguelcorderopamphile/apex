@@ -61,44 +61,46 @@
                     pc.onicecandidate = (e) => {
                         if (e.candidate && ws.readyState===1) ws.send(JSON.stringify({type:'ice-candidate',candidate:e.candidate}));
                     };
-                    dc = pc.createDataChannel('api',{ordered:true});
-                    dc.onopen = async () => {
-                        setUI('ok','Conexion P2P lista','Cargando aplicacion...');
-                        try {
-                            ws.close();
-                        } catch(_){}
-                        try {
-                            dc.send(JSON.stringify({id:'spa-req',comando:'obtener_spa'}));
-                        } catch(_){}
-                    };
-                    dc.onmessage = (ev2) => {
-                        try {
-                            const r = JSON.parse(ev2.data);
-                            if (r.id==='spa-req' && r.body) {
-                                const html = r.body.html;
-                                const jsUrl = r.body.jsUrl;
-                                const cssUrl = r.body.cssUrl;
-                                document.open();
-                                document.write(html);
-                                document.close();
-                                if (cssUrl) {
-                                    const link = document.createElement('link');
-                                    link.rel = 'stylesheet';
-                                    link.href = cssUrl;
-                                    document.head.appendChild(link);
+                    pc.ondatachannel = (ev) => {
+                        dc = ev.channel;
+                        dc.onopen = async () => {
+                            setUI('ok','Conexion P2P lista','Cargando aplicacion...');
+                            try {
+                                ws.close();
+                            } catch(_){}
+                            try {
+                                dc.send(JSON.stringify({id:'spa-req',comando:'obtener_spa'}));
+                            } catch(_){}
+                        };
+                        dc.onmessage = (ev2) => {
+                            try {
+                                const r = JSON.parse(ev2.data);
+                                if (r.id==='spa-req' && r.body) {
+                                    const html = r.body.html;
+                                    const jsUrl = r.body.jsUrl;
+                                    const cssUrl = r.body.cssUrl;
+                                    document.open();
+                                    document.write(html);
+                                    document.close();
+                                    if (cssUrl) {
+                                        const link = document.createElement('link');
+                                        link.rel = 'stylesheet';
+                                        link.href = cssUrl;
+                                        document.head.appendChild(link);
+                                    }
+                                    if (jsUrl) {
+                                        const script = document.createElement('script');
+                                        script.src = jsUrl;
+                                        document.head.appendChild(script);
+                                    }
                                 }
-                                if (jsUrl) {
-                                    const script = document.createElement('script');
-                                    script.src = jsUrl;
-                                    document.head.appendChild(script);
-                                }
+                            } catch(_){}
+                        };
+                        dc.onclose = () => {
+                            if (!document.querySelector('script[src]')) {
+                                setUI('err','Conexion perdida','Recargue la pagina para reconectar');
                             }
-                        } catch(_){}
-                    };
-                    dc.onclose = () => {
-                        if (!document.querySelector('script[src]')) {
-                            setUI('err','Conexion perdida','Recargue la pagina para reconectar');
-                        }
+                        };
                     };
                     await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
                     const ans = await pc.createAnswer();
