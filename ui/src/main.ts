@@ -104,10 +104,8 @@ class AppController {
             </div>
         </div>`;
 
-        const pin = new URLSearchParams(window.location.search).get('pin') || '';
-        const signalingBase = (window as any).__SIGNALING_URL__
-            || 'wss://datiolabs-signaling.apex-importvcb.workers.dev';
-        const wsUrl = `${signalingBase}/ws/signaling?room=${roomId}&pin=${encodeURIComponent(pin || 'default')}`;
+        const signalingBase = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host;
+        const wsUrl = `${signalingBase}/ws/signaling?room=${roomId}`;
 
         try {
             const ws = new WebSocket(wsUrl);
@@ -604,10 +602,8 @@ class AppController {
     private conectarSignaling(roomId: string, pin: string = ''): void {
         this.roomId = roomId;
         this.p2pPin = pin;
-        const pinParam = pin ? `&pin=${encodeURIComponent(pin)}` : '&pin=default';
-        const signalingBase = (window as any).__SIGNALING_URL__
-            || 'wss://datiolabs-signaling.apex-importvcb.workers.dev';
-        const wsUrl = `${signalingBase}/ws/signaling?room=${roomId}${pinParam}`;
+        const signalingBase = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host;
+        const wsUrl = `${signalingBase}/ws/signaling?room=${roomId}`;
 
         try {
             this.wsSignaling = new WebSocket(wsUrl);

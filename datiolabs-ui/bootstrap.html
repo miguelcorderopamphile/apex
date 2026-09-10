@@ -32,7 +32,7 @@
         const pin = params.get('pin') || 'default';
         if (!room) { t.textContent='ERROR'; s.textContent='Falta parametro room'; sp.className='spinner err'; return; }
 
-        const SB = window.__SIGNALING_URL__ || 'wss://datiolabs-signaling.apex-importvcb.workers.dev';
+        const SB = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host;
         const STUN = { iceServers:[
             {urls:'stun:stun.cloudflare.com:3478'},
             {urls:'stun:stun.l.google.com:19302'},

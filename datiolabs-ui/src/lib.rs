@@ -530,40 +530,15 @@ async fn ws_signaling_handler(
     ws: WebSocketUpgrade,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     State(state): State<AxumAppState>,
-) -> impl IntoResponse {
+) -> Response {
     let room = params.get("room").cloned().unwrap_or_else(|| "default".to_string());
-    let pin = params.get("pin").cloned().unwrap_or_default();
-    
-    // Rate limiting: check attempts by room+pin combination
-    let rate_key = format!("{}:{}", room, pin);
-    if let Err(msg) = state.rate_limiter.check_and_record(&rate_key) {
-        return Err((StatusCode::TOO_MANY_REQUESTS, msg));
-    }
-    
-    let pin_valido = {
-        let ledger = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-        let cfg = match ledger.cargar_config() {
-            Ok(Some(c)) => c,
-            _ => return Err((StatusCode::UNAUTHORIZED, "Configuración no encontrada".into())),
-        };
-        cfg.pin_dueno_sha256.is_empty() || cfg.pin_dueno_sha256 == hash_pin(&pin)
-    };
-    
-    if !pin_valido {
-        return Err((StatusCode::FORBIDDEN, "PIN incorrecto".into()));
-    }
-    
-    // Clear rate limiter on successful PIN
-    state.rate_limiter.clear(&rate_key);
-    
-    Ok(ws.on_upgrade(move |socket| handle_signaling_peer(socket, room, state, pin)))
+    ws.on_upgrade(move |socket| handle_signaling_peer(socket, room, state)).into_response()
 }
 
 async fn handle_signaling_peer(
     socket: WebSocket,
     room: String,
     state: AxumAppState,
-    _pin: String,
 ) {
     let (mut ws_tx, mut ws_rx) = socket.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
