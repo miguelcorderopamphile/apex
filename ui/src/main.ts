@@ -32,6 +32,7 @@ class AppController {
     private dataChannel: RTCDataChannel | null = null;
     private wsSignaling: WebSocket | null = null;
     private offerResendTimer: ReturnType<typeof setInterval> | null = null;
+    private p2pPin: string = '';
 
     private readonly STUN_SERVERS: RTCConfiguration = {
         iceServers: [
@@ -246,10 +247,11 @@ class AppController {
                 <input id="pin-inv-input" type="password" inputmode="numeric" maxlength="16" autofocus
                     class="w-full border-2 border-brand-black rounded px-4 py-3 text-2xl tracking-[0.5em] text-center mb-3" />
                 <p id="pin-inv-error" class="hidden text-red-700 font-bold mb-2">Clave incorrecta.</p>
-                <div class="grid grid-cols-2 gap-3">
+                <div class="grid grid-cols-2 gap-3 mb-3">
                     <button id="pin-inv-cancelar" class="bg-white border-2 border-brand-black font-heading font-black py-3 rounded">CANCELAR</button>
                     <button id="pin-inv-ok" class="bg-brand-black text-white font-heading font-black py-3 rounded">ENTRAR</button>
                 </div>
+                <button id="pin-inv-sin-clave" class="w-full bg-gray-100 border-2 border-brand-black font-heading font-black py-2 rounded text-xs">VER SIN CLAVE (solo stock)</button>
             </div>
         </div>`;
         const cerrar = (): void => { this.modalRoot.innerHTML = ''; };
@@ -260,20 +262,24 @@ class AppController {
                 const ok = await api.validarPin(pin).catch(() => false);
                 if (ok) {
                     cerrar();
-                    await this.abrirInventario();
+                    await this.abrirInventario(true);
                 } else {
                     document.getElementById('pin-inv-error')?.classList.remove('hidden');
                 }
             })();
         document.getElementById('pin-inv-ok')?.addEventListener('click', intentar);
+        document.getElementById('pin-inv-sin-clave')?.addEventListener('click', () => {
+            cerrar();
+            void this.abrirInventario(false);
+        });
         document.getElementById('pin-inv-input')?.addEventListener('keydown', (e) => {
             if ((e as KeyboardEvent).key === 'Enter') intentar();
         });
     }
 
-    private async abrirInventario(): Promise<void> {
+    private async abrirInventario(duenoAutenticado: boolean = true): Promise<void> {
         this.marcarActivo('inventario');
-        const vista = new InventarioView(this.root, this.modelo);
+        const vista = new InventarioView(this.root, this.modelo, duenoAutenticado);
         try {
             await vista.render();
         } catch (e) {
@@ -403,8 +409,13 @@ class AppController {
                                 </div>
                                 <p class="text-[10px] text-gray-500">El dispositivo movil escanea el QR y se conecta via WebRTC DataChannel.</p>
                             </div>
-                            <div class="bg-amber-100 border border-brand-black rounded p-2 text-[10px] font-bold text-amber-900">
+                            <div class="bg-amber-100 border border-brand-black rounded p-2 text-[10px] font-bold text-amber-900 mb-3">
                                 La conexion solicitará obligatoriamente la Clave del Dueño definida al instalar.
+                            </div>
+                            <div class="space-y-2">
+                                <label class="block text-[11px] font-bold uppercase text-gray-700">Clave P2P (Opcional)</label>
+                                <input id="p2p-pin-input" type="password" maxlength="16" placeholder="Dejar vacio para clave por defecto" class="w-full border-2 border-brand-black rounded px-3 py-1.5 font-bold bg-white text-xs" />
+                                <p class="text-[10px] text-gray-500">Si se define, el dispositivo movil debera ingresar esta clave para conectarse.</p>
                             </div>
                         </div>
                     </div>
@@ -425,13 +436,18 @@ class AppController {
         document.getElementById('qr-cerrar-btn')?.addEventListener('click', cerrar);
 
         if (roomId) {
-            this.conectarSignaling(roomId);
+            const pinInput = document.getElementById('p2p-pin-input') as HTMLInputElement | null;
+            const pin = pinInput?.value?.trim() || '';
+            this.conectarSignaling(roomId, pin);
         }
     }
 
-    private conectarSignaling(roomId: string): void {
-        const host = window.location.hostname || '127.0.0.1';
-        const wsUrl = `ws://${host}:4000/ws/signaling?room=${roomId}`;
+    private conectarSignaling(roomId: string, pin: string = ''): void {
+        this.p2pPin = pin;
+        const pinParam = pin ? `&pin=${encodeURIComponent(pin)}` : '&pin=default';
+        const signalingBase = (window as any).__SIGNALING_URL__
+            || 'wss://datiolabs-signaling.<tu-subdominio>.workers.dev';
+        const wsUrl = `${signalingBase}/ws/signaling?room=${roomId}${pinParam}`;
 
         try {
             this.wsSignaling = new WebSocket(wsUrl);
@@ -457,7 +473,7 @@ class AppController {
                 this.actualizarEstadoP2P('disconnected', 'Desconectado del servidor de senalizacion. Reconectando...');
                 setTimeout(() => {
                     if (this.wsSignaling && this.wsSignaling.readyState === WebSocket.CLOSED) {
-                        this.conectarSignaling(roomId);
+                        this.conectarSignaling(roomId, this.p2pPin);
                     }
                 }, 3000);
             };
@@ -599,5 +615,6 @@ class AppController {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('contextmenu', (e) => e.preventDefault());
     new AppController().arrancar().catch((e) => console.error(e));
 });

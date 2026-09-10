@@ -185,6 +185,7 @@ struct AxumAppState {
     session_store: SessionStore,
     tx: broadcast::Sender<()>,
     signaling: Arc<Mutex<HashMap<String, Vec<(String, mpsc::UnboundedSender<String>)>>>>,
+    rate_limiter: RateLimiter,
 }
 
 async fn api_auth_login(
@@ -503,13 +504,38 @@ async fn ws_signaling_handler(
     State(state): State<AxumAppState>,
 ) -> impl IntoResponse {
     let room = params.get("room").cloned().unwrap_or_else(|| "default".to_string());
-    ws.on_upgrade(move |socket| handle_signaling_peer(socket, room, state))
+    let pin = params.get("pin").cloned().unwrap_or_default();
+    
+    // Rate limiting: check attempts by room+pin combination
+    let rate_key = format!("{}:{}", room, pin);
+    if let Err(msg) = state.rate_limiter.check_and_record(&rate_key) {
+        return Err((StatusCode::TOO_MANY_REQUESTS, msg));
+    }
+    
+    let pin_valido = {
+        let ledger = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+        let cfg = match ledger.cargar_config() {
+            Ok(Some(c)) => c,
+            _ => return Err((StatusCode::UNAUTHORIZED, "Configuración no encontrada".into())),
+        };
+        cfg.pin_dueno_sha256.is_empty() || cfg.pin_dueno_sha256 == hash_pin(&pin)
+    };
+    
+    if !pin_valido {
+        return Err((StatusCode::FORBIDDEN, "PIN incorrecto".into()));
+    }
+    
+    // Clear rate limiter on successful PIN
+    state.rate_limiter.clear(&rate_key);
+    
+    Ok(ws.on_upgrade(move |socket| handle_signaling_peer(socket, room, state, pin)))
 }
 
 async fn handle_signaling_peer(
     socket: WebSocket,
     room: String,
     state: AxumAppState,
+    _pin: String,
 ) {
     let (mut ws_tx, mut ws_rx) = socket.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
@@ -604,6 +630,8 @@ async fn api_productos(
             unidad: catalogo.unidad(i),
             es_caja: catalogo.es_caja(i),
             unidades_por_caja: catalogo.unidades_por_caja(i),
+            precio_paquete_usd: catalogo.precio_paquete_usd(i),
+            nombre_paquete: catalogo.nombre_paquete(i),
         })
         .collect();
     Ok(Json(filas))
@@ -677,7 +705,7 @@ async fn api_cuentas_consumo(
     } else {
         venta.lineas.agregar(
             sku_obj, catalogo.nombre_obj(idx),
-            cant, catalogo.precio_usd(idx), tasa,
+            cant, catalogo.precio_usd(idx), tasa, "unidad".to_string(),
         );
     }
     descontar_con_lotes_interno(&*db, &catalogo, idx, cant, &venta.id)
@@ -862,6 +890,8 @@ async fn api_productos_crear(
         unidad: body.get("unidad").and_then(|v| v.as_str()).map(String::from),
         es_caja: body.get("esCaja").and_then(|v| v.as_bool()).unwrap_or(false),
         unidades_por_caja: body.get("unidadesPorCaja").and_then(|v| v.as_u64()).map(|n| n as u32),
+        precio_paquete_usd: body.get("precioPaqueteUsd").and_then(|v| v.as_str()).and_then(|s| s.parse::<rust_decimal::Decimal>().ok()),
+        nombre_paquete: body.get("nombrePaquete").and_then(|v| v.as_str()).map(String::from),
     };
     let db = state.ledger.lock().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "DB bloqueada".to_string()))?;
     db.guardar_producto(&p).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -973,12 +1003,18 @@ async fn api_ventas_registrar(
     for item in &items {
         let sku_str = item.get("sku").and_then(|v| v.as_str()).unwrap_or("");
         let cant: rust_decimal::Decimal = item.get("cantidad").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or(rust_decimal::Decimal::ONE);
+        let modo = item.get("modo_venta").and_then(|v| v.as_str()).unwrap_or("unidad");
         let idx = catalogo.indice_de(sku_str)
             .ok_or((StatusCode::BAD_REQUEST, format!("SKU inexistente: {sku_str}")))?;
         validar_linea(catalogo.capacidades(idx), cant, catalogo.stock(idx))
             .map_err(|e| (StatusCode::BAD_REQUEST, format!("{e}")))?;
         toques.push((idx, cant));
-        lineas.agregar(catalogo.sku_obj(idx), catalogo.nombre_obj(idx), cant, catalogo.precio_usd(idx), tasa);
+        let precio_efectivo = if modo == "paquete" {
+            catalogo.precio_paquete_usd(idx).unwrap_or(catalogo.precio_usd(idx))
+        } else {
+            catalogo.precio_usd(idx)
+        };
+        lineas.agregar(catalogo.sku_obj(idx), catalogo.nombre_obj(idx), cant, precio_efectivo, tasa, modo.to_string());
     }
 
     let total_usd = lineas.total_usd();
@@ -1308,7 +1344,7 @@ async fn api_config_privacidad(State(state): State<AxumAppState>, Json(body): Js
 }
 
 // Respaldos
-async fn api_respaldos_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<RespaldoInfo>>, (StatusCode, String)> {
+async fn api_respaldos_listar(State(_state): State<AxumAppState>) -> Result<Json<Vec<RespaldoInfo>>, (StatusCode, String)> {
     use datiolabs_core::db::BackupMetadata;
     use std::io::{BufReader, Read, Seek, SeekFrom};
     let dir = get_backup_dir().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error directorio: {e}")))?;
@@ -1430,6 +1466,8 @@ struct AppState {
     servicio_tasa: Arc<ServicioTasa>,
     session_store: SessionStore,
     tx: broadcast::Sender<()>,
+    external_ip: Arc<Mutex<Option<String>>>,
+    dedup_ventas: Arc<std::sync::Mutex<HashMap<String, (i64, String)>>>, // key -> (timestamp, venta_id)
 }
 
 fn ahora_unix() -> i64 {
@@ -1453,6 +1491,90 @@ fn hex_token(token: &[u8; 32]) -> String {
         out[i * 2 + 1] = HEX[(token[i] & 0x0f) as usize];
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+// ---------------- UPnP: auto port forwarding ----------------
+
+async fn try_upnp(port: u16) -> Option<String> {
+    let options = igd::SearchOptions::default();
+    match igd::search_gateway(options) {
+        Ok(gateway) => {
+            let local_ip = match local_ip_address::local_ip() {
+                Ok(ip) => ip,
+                Err(_) => return None,
+            };
+            let local_addr = std::net::SocketAddrV4::new(
+                match local_ip {
+                    std::net::IpAddr::V4(v4) => v4,
+                    _ => return None,
+                },
+                port,
+            );
+            match gateway.add_port(
+                igd::PortMappingProtocol::TCP,
+                port,
+                local_addr,
+                3600,
+                "DatioLabs",
+            ) {
+                Ok(_) => {
+                    let external_ip = gateway.get_external_ip().ok()?;
+                    Some(external_ip.to_string())
+                }
+                Err(e) => {
+                    eprintln!("[UPnP] Error adding port mapping: {:?}", e);
+                    None
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("[UPnP] Gateway not found: {:?}", e);
+            None
+        }
+    }
+}
+
+// ---------------- Rate Limiting para PIN ----------------
+
+#[derive(Clone)]
+struct RateLimiter {
+    attempts: Arc<std::sync::Mutex<HashMap<String, Vec<i64>>>>,
+    max_attempts: usize,
+    lockout_secs: i64,
+}
+
+impl RateLimiter {
+    fn new(max_attempts: usize, lockout_secs: i64) -> Self {
+        Self {
+            attempts: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            max_attempts,
+            lockout_secs,
+        }
+    }
+
+    fn check_and_record(&self, key: &str) -> Result<(), String> {
+        let mut map = self.attempts.lock().map_err(|e| e.to_string())?;
+        let now = ahora_unix();
+        let entry = map.entry(key.to_string()).or_insert_with(Vec::new);
+        entry.retain(|&t| now - t < self.lockout_secs);
+
+        if entry.len() >= self.max_attempts {
+            let remaining = self.lockout_secs - (now - entry[0]);
+            return Err(format!(
+                "Demasiados intentos. Espera {} segundos.",
+                remaining
+            ));
+        }
+
+        entry.push(now);
+        Ok(())
+    }
+
+    fn clear(&self, key: &str) {
+        if let Ok(mut map) = self.attempts.lock() {
+            map.remove(key);
+        }
+    }
 }
 
 fn con_ledger<T, E>(
@@ -1512,6 +1634,10 @@ struct ProductoInput {
     es_caja: Option<bool>,
     #[serde(default)]
     unidades_por_caja: Option<u32>,
+    #[serde(default)]
+    precio_paquete_usd: Option<String>,
+    #[serde(default)]
+    nombre_paquete: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1537,6 +1663,10 @@ struct ProductoDto {
     es_caja: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     unidades_por_caja: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    precio_paquete_usd: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    nombre_paquete: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1544,6 +1674,8 @@ struct ProductoDto {
 struct ItemVentaDto {
     sku: String,
     cantidad: String,
+    #[serde(default)]
+    modo_venta: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1556,6 +1688,8 @@ struct LineaTicketDto {
     tasa_bloqueada: Decimal,
     subtotal_usd: Decimal,
     subtotal_bs: Decimal,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    modo_venta: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -1613,11 +1747,14 @@ struct TicketDto {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ConsumoCuentaDto {
+    id: String,
     sku: String,
     nombre: String,
     cantidad: Decimal,
     precio_usd: Decimal,
     subtotal_usd: Decimal,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    modo_venta: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1657,7 +1794,6 @@ struct TopProductoDto {
     cantidad: Decimal,
 }
 
-const MAX_PANEL_TOP: usize = 5;
 const MAX_PANEL_CRITICOS: usize = 16;
 
 #[derive(Serialize)]
@@ -1824,6 +1960,16 @@ fn inicializar_negocio(
     let titular = licencia_titular.unwrap_or_default();
     let estado_lic = if clave.is_empty() { "demo".to_string() } else { "activa".to_string() };
 
+    // Validate PIN length if provided
+    if let Some(ref p) = pin_dueno {
+        if !p.trim().is_empty() && p.trim().len() < 6 {
+            return Err(UIError::new(
+                "pin muy corto",
+                "El PIN debe tener al menos 6 dígitos",
+            ));
+        }
+    }
+
     con_ledger(&estado, |db| {
         db.guardar_config(&ConfigNegocio {
             nombre: nombre_obj,
@@ -1946,6 +2092,8 @@ fn crear_producto(estado: tauri::State<AppState>, input: ProductoInput) -> Resul
         unidad: input.unidad.clone(),
         es_caja: input.es_caja.unwrap_or(false),
         unidades_por_caja: input.unidades_por_caja,
+        precio_paquete_usd: input.precio_paquete_usd.as_deref().and_then(|s| decimal_de(s).ok()),
+        nombre_paquete: input.nombre_paquete.clone(),
     };
     if producto.sku.as_str().is_empty()
         || producto.nombre.as_str().is_empty()
@@ -1988,6 +2136,8 @@ fn listar_productos(estado: tauri::State<AppState>) -> Result<Vec<ProductoDto>, 
             unidad: p.unidad,
             es_caja: p.es_caja,
             unidades_por_caja: p.unidades_por_caja,
+            precio_paquete_usd: p.precio_paquete_usd,
+            nombre_paquete: p.nombre_paquete,
         })
         .collect();
     Ok(filas)
@@ -2103,6 +2253,7 @@ fn registrar_venta(
     monto_recibido_bs: String,
     pagos: Option<Vec<PagoTicketDto>>,
     resolucion_vuelto: Option<ResolucionVueltoDto>,
+    idempotency_key: Option<String>,
 ) -> Result<TicketDto, UIError> {
     if items.is_empty() {
         return Err(UIError::new("venta vacia", "Agregue productos al carrito"));
@@ -2110,6 +2261,24 @@ fn registrar_venta(
     let _cfg = config_requerida(&estado)?;
     let tasa = tasa_viva(&estado)?;
     let recibido = decimal_de(&monto_recibido_bs)?;
+
+    // Idempotency check: if this key was used recently, return the existing ticket
+    if let Some(ref key) = idempotency_key {
+        let now = ahora_unix();
+        if let Ok(mut dedup) = estado.dedup_ventas.lock() {
+            // Clean up entries older than 5 minutes
+            dedup.retain(|_, (ts, _)| now - *ts < 300);
+            if let Some((_, venta_id)) = dedup.get(key) {
+                // Return existing ticket
+                let venta_id_clone = venta_id.clone();
+                return con_ledger(&estado, |db| -> Result<TicketDto, DbError> {
+                    let venta = db.cargar_venta(&venta_id_clone)?
+                        .ok_or_else(|| DbError::Negocio(ErrorNegocio::ProductoInexistente))?;
+                    Ok(armar_ticket(&venta, recibido, Decimal::ZERO))
+                });
+            }
+        }
+    }
 
     let resultado = con_ledger(&estado, |db| {
         let catalogo = catalogo_fresco(db)?;
@@ -2120,20 +2289,29 @@ fn registrar_venta(
                 .indice_de(item.sku.trim().to_uppercase().as_str())
                 .ok_or(DbError::Negocio(ErrorNegocio::ProductoInexistente))?;
             let cantidad = decimal_de(&item.cantidad)?;
+            let modo = item.modo_venta.as_deref().unwrap_or("unidad");
             validar_linea(catalogo.capacidades(idx), cantidad, catalogo.stock(idx))?;
             toques.push((idx, cantidad));
+            let precio_efectivo = if modo == "paquete" {
+                catalogo.precio_paquete_usd(idx).unwrap_or(catalogo.precio_usd(idx))
+            } else {
+                catalogo.precio_usd(idx)
+            };
             lineas.agregar(
                 catalogo.sku_obj(idx),
                 catalogo.nombre_obj(idx),
                 cantidad,
-                catalogo.precio_usd(idx),
+                precio_efectivo,
                 tasa,
+                modo.to_string(),
             );
         }
 
         let total_usd = lineas.total_usd();
         let total_bs = lineas.total_bs();
-        if recibido > Decimal::ZERO && recibido < total_bs {
+        // Use epsilon tolerance for comparison to handle floating point precision issues
+        let epsilon = Decimal::from_str("0.01").unwrap_or(Decimal::ZERO);
+        if recibido > Decimal::ZERO && (total_bs - recibido) > epsilon {
             return Err(UIError::new(
                 "monto insuficiente",
                 "El pago recibido no cubre el total en bolivares",
@@ -2222,6 +2400,14 @@ fn registrar_venta(
 
         Ok(armar_ticket(&firmada, recibido, vuelto))
     });
+
+    // Store idempotency key after successful sale
+    if let (Some(key), Ok(ticket)) = (&idempotency_key, &resultado) {
+        if let Ok(mut dedup) = estado.dedup_ventas.lock() {
+            dedup.insert(key.clone(), (ahora_unix(), ticket.venta_id.clone()));
+        }
+    }
+
     notificar_panel(&estado);
     resultado
 }
@@ -2285,6 +2471,7 @@ fn armar_ticket(venta: &Venta, recibido: Decimal, vuelto: Decimal) -> TicketDto 
                     tasa_bloqueada: venta.lineas.tasas_bloqueadas[i],
                     subtotal_usd: sub_usd,
                     subtotal_bs: sub_usd * venta.lineas.tasas_bloqueadas[i],
+                    modo_venta: venta.lineas.modos_venta.get(i).cloned(),
                 }
             })
             .collect(),
@@ -2347,11 +2534,13 @@ fn abrir_cuenta(
 fn cuenta_dto(v: &Venta) -> CuentaDto {
     let consumos: Vec<ConsumoCuentaDto> = (0..v.lineas.skus.len())
         .map(|i| ConsumoCuentaDto {
+            id: format!("consumo-{}", i),
             sku: v.lineas.skus[i].as_str().to_string(),
             nombre: v.lineas.nombres[i].as_str().to_string(),
             cantidad: v.lineas.cantidades[i],
             precio_usd: v.lineas.precios_usd[i],
             subtotal_usd: v.lineas.cantidades[i] * v.lineas.precios_usd[i],
+            modo_venta: v.lineas.modos_venta.get(i).cloned(),
         })
         .collect();
     CuentaDto {
@@ -2385,10 +2574,12 @@ fn agregar_consumo(
     venta_id: String,
     sku: String,
     cantidad: String,
+    modo_venta: Option<String>,
 ) -> Result<CuentaDto, UIError> {
     let _cfg = config_requerida(&estado)?;
     let tasa = tasa_viva(&estado)?;
     let cant = decimal_de(&cantidad)?;
+    let modo = modo_venta.unwrap_or_else(|| "unidad".to_string());
 
     let actualizada = con_ledger(&estado, |db| {
         let mut venta = db
@@ -2405,6 +2596,11 @@ fn agregar_consumo(
         validar_linea(catalogo.capacidades(idx), cant, catalogo.stock(idx))?;
 
         let sku_obj = catalogo.sku_obj(idx);
+        let precio_efectivo = if modo == "paquete" {
+            catalogo.precio_paquete_usd(idx).unwrap_or(catalogo.precio_usd(idx))
+        } else {
+            catalogo.precio_usd(idx)
+        };
         if let Some(pos) = venta.lineas.skus.iter().position(|s| s == &sku_obj) {
             venta.lineas.cantidades[pos] += cant;
         } else {
@@ -2412,8 +2608,9 @@ fn agregar_consumo(
                 sku_obj,
                 catalogo.nombre_obj(idx),
                 cant,
-                catalogo.precio_usd(idx),
+                precio_efectivo,
                 tasa,
+                modo,
             );
         }
         descontar_con_lotes_interno(db, &catalogo, idx, cant, &venta.id)?;
@@ -2451,7 +2648,9 @@ fn cerrar_cuenta(
         };
         let total_neto_bs = total_neto_usd * tasa;
 
-        if recibido > Decimal::ZERO && recibido < total_neto_bs {
+        // Use epsilon tolerance for comparison to handle floating point precision issues
+        let epsilon = Decimal::from_str("0.01").unwrap_or(Decimal::ZERO);
+        if recibido > Decimal::ZERO && (total_neto_bs - recibido) > epsilon {
             return Err(DbError::Negocio(ErrorNegocio::PagoInsuficiente {
                 requerido: total_neto_bs,
                 recibido,
@@ -2666,8 +2865,22 @@ fn datos_panel(estado: tauri::State<AppState>) -> Result<PanelDto, UIError> {
         let cuentas_todas = db.cuentas_abiertas()?;
         let abiertas = cuentas_todas.len();
 
-        // Financial metrics
-        let costo_total_usd = usd * dec!(0.65);
+        // Financial metrics - calculate from actual product costs
+        let mut total_venta_usd = Decimal::ZERO;
+        let mut total_costo_usd = Decimal::ZERO;
+        for i in 0..catalogo.len() {
+            let precio_venta = catalogo.precio_usd(i);
+            let precio_bruto = catalogo.precio_bruto_usd(i).unwrap_or(Decimal::ZERO);
+            if precio_venta > Decimal::ZERO {
+                total_venta_usd += precio_venta;
+                total_costo_usd += if precio_bruto > Decimal::ZERO { precio_bruto } else { precio_venta * dec!(0.65) };
+            }
+        }
+        let costo_total_usd = if total_venta_usd > Decimal::ZERO { 
+            usd * total_costo_usd / total_venta_usd 
+        } else { 
+            usd * dec!(0.65) 
+        };
         let ganancia_bruta_usd = usd - costo_total_usd;
         let impuestos_usd = usd * dec!(0.12);
         let ganancia_neta_usd = ganancia_bruta_usd - impuestos_usd;
@@ -2879,8 +3092,16 @@ struct QrData {
 }
 
 #[tauri::command]
-fn generar_qr_panel(_state: tauri::State<AppState>) -> Result<QrData, UIError> {
-    let ip = get_lan_ip()?;
+fn generar_qr_panel(state: tauri::State<AppState>) -> Result<QrData, UIError> {
+    // Try external IP from UPnP first, fall back to LAN IP
+    let ip = {
+        let ext = state.external_ip.lock().map_err(|_| UIError::new("error de bloqueo", ""))?;
+        if let Some(ref ip) = *ext {
+            ip.clone()
+        } else {
+            get_lan_ip()?
+        }
+    };
     let room_id = Uuid::new_v4().to_string();
     let url = format!("http://{}:4000/panel?room={}", ip, room_id);
 
@@ -3310,6 +3531,13 @@ fn cambiar_pin_dueno(
             return Err(UIError::new("pin incorrecto", "La clave anterior no coincide"));
         }
     }
+    // Validate new PIN length
+    if !pin_nuevo.trim().is_empty() && pin_nuevo.trim().len() < 6 {
+        return Err(UIError::new(
+            "pin muy corto",
+            "El PIN debe tener al menos 6 dígitos",
+        ));
+    }
     cfg.pin_dueno_sha256 = if pin_nuevo.trim().is_empty() {
         String::new()
     } else {
@@ -3478,9 +3706,14 @@ fn cerrar_jornada(estado: tauri::State<AppState>) -> Result<Jornada, UIError> {
 fn eliminar_consumo(
     estado: tauri::State<AppState>,
     venta_id: String,
-    consumo_idx: usize,
+    consumo_id: String,
 ) -> Result<CuentaDto, UIError> {
     config_requerida(&estado)?;
+    // Parse index from consumption ID (format: "consumo-{index}")
+    let consumo_idx = consumo_id
+        .strip_prefix("consumo-")
+        .and_then(|s| s.parse::<usize>().ok())
+        .ok_or_else(|| UIError::new("consumo invalido", "El ID del consumo no es valido"))?;
     let actualizada = con_ledger(&estado, |db| {
         let mut venta = db
             .cargar_venta(&venta_id)?
@@ -3706,6 +3939,8 @@ pub fn run() {
                 servicio_tasa: servicio_tasa.clone(),
                 session_store: SessionStore::new(&db_sled)?,
                 tx: broadcast::channel(16).0,
+                external_ip: Arc::new(Mutex::new(None)),
+                dedup_ventas: Arc::new(std::sync::Mutex::new(HashMap::new())),
             };
 
             app.manage(app_state.clone());
@@ -3716,6 +3951,7 @@ pub fn run() {
             let ledger_for_axum = ledger_arc.clone();
             let servicio_tasa_for_axum = servicio_tasa.clone();
             let tx_for_axum = app_state.tx.clone();
+            let app_state_clone = app_state.clone();
 
             tauri::async_runtime::spawn(async move {
                 let cors = CorsLayer::new()
@@ -3798,9 +4034,23 @@ pub fn run() {
                         session_store,
                         tx: tx_for_axum,
                         signaling: Arc::new(Mutex::new(HashMap::new())),
+                        rate_limiter: RateLimiter::new(5, 300), // 5 intentos, lockout 5 minutos
                     });
 
                 if let Ok(listener) = tokio::net::TcpListener::bind("0.0.0.0:4000").await {
+                    // Try UPnP for automatic port forwarding
+                    let upnp_ip = try_upnp(4000).await;
+                    if let Some(ref ip) = upnp_ip {
+                        println!("[UPnP] External IP: {}", ip);
+                        // Store external IP in app state for QR generation
+                        if let Ok(mut ext) = app_state_clone.external_ip.lock() {
+                            *ext = Some(ip.clone());
+                        }
+                    } else {
+                        println!("[UPnP] Could not set up port forwarding");
+                    }
+                    
+                    println!("[Server] Listening on 0.0.0.0:4000");
                     let _ = axum::serve(listener, app).await;
                 }
             });

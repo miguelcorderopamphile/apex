@@ -199,6 +199,7 @@ fuzz_target!(|data: &[u8]| {
                             next_decimal!().abs().max(dec!(1)),
                             dec!(1),
                             tasa,
+                            "unidad".to_string(),
                         );
                     }
                 }

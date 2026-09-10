@@ -22,6 +22,7 @@ interface LineaCarrito {
     conVariantes: boolean;
     serie?: string;
     variante?: string;
+    modoVenta: 'unidad' | 'paquete';
 }
 
 export class CajaViewModel {
@@ -111,25 +112,28 @@ export class CajaViewModel {
         this.edadConfirmadaSesion = v;
     }
 
-    async agregar(sku: string): Promise<string | null> {
+    async agregar(sku: string, modoVenta: 'unidad' | 'paquete' = 'unidad'): Promise<string | null> {
         const p = this.productos.find((x) => x.sku === sku);
         if (!p) return 'Producto no encontrado';
         if (this.requiereEdad(p)) return 'EDAD|' + p.nombre;
-        return this.empujar(p);
+        return this.empujar(p, undefined, undefined, modoVenta);
     }
 
-    empujar(p: ProductoInfo, serie?: string, variante?: string): string | null {
-        const pesable = (p.capacidades & CAP_PESABLE) !== 0 || p.unidad === 'kg' || p.unidad === 'ml';
+    empujar(p: ProductoInfo, serie?: string, variante?: string, modoVenta: 'unidad' | 'paquete' = 'unidad'): string | null {
+        const esPaquete = modoVenta === 'paquete' && p.precioPaqueteUsd;
+        const precioEfectivo = esPaquete ? Number(p.precioPaqueteUsd) : Number(p.precioUsd);
+        const pesable = !esPaquete && ((p.capacidades & CAP_PESABLE) !== 0 || p.unidad === 'kg' || p.unidad === 'ml');
         const paso = pesable ? 0.25 : 1;
-        const existente = this.carrito.find((l) => l.sku === p.sku && l.serie === serie && l.variante === variante);
+        const existente = this.carrito.find((l) => l.sku === p.sku && l.serie === serie && l.variante === variante && l.modoVenta === modoVenta);
         const cantActual = existente ? existente.cantidad : 0;
         const cantDeseada = cantActual + paso;
 
         // Validación de stock: no permitir si no es servicio o venta libre
         if (!p.sinStock) {
+            const unidadesBase = esPaquete ? (p.unidadesPorCaja || 1) : 1;
             const stockDisponible = Number(p.stock);
-            if (stockDisponible < cantDeseada) {
-                return `Stock insuficiente para ${p.nombre}. Disponible: ${stockDisponible}, Solicitado: ${cantDeseada}`;
+            if (stockDisponible < cantDeseada * unidadesBase) {
+                return `Stock insuficiente para ${p.nombre}. Disponible: ${stockDisponible}, Solicitado: ${cantDeseada * unidadesBase}`;
             }
         }
 
@@ -143,13 +147,14 @@ export class CajaViewModel {
             this.carrito.push({
                 sku: p.sku,
                 nombre: p.nombre,
-                precioUsd: Number(p.precioUsd),
+                precioUsd: precioEfectivo,
                 cantidad: pesable ? paso : Math.round(paso),
                 pesable,
                 conSerie: (p.capacidades & CAP_SERIE) !== 0,
                 conVariantes: (p.capacidades & CAP_VARIANTES) !== 0,
                 serie,
                 variante,
+                modoVenta,
             });
         }
         this.notificar();
@@ -221,11 +226,12 @@ export class CajaViewModel {
         }
 
         const ticket = await api.registrarVenta(
-            this.carrito.map((l) => ({ sku: l.sku, cantidad: String(l.cantidad) })),
+            this.carrito.map((l) => ({ sku: l.sku, cantidad: String(l.cantidad), modo_venta: l.modoVenta })),
             this.edadConfirmadaSesion,
             recibidoBs || '0',
             pagos,
             resolucionVuelto,
+            `sale-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         );
         this.vaciar();
         this.edadConfirmadaSesion = false;
@@ -242,7 +248,7 @@ export class CajaViewModel {
         this.notificar();
     }
 
-    async agregarACuenta(sku: string): Promise<string | null> {
+    async agregarACuenta(sku: string, modoVenta: 'unidad' | 'paquete' = 'unidad'): Promise<string | null> {
         if (!this.cuentaSeleccionada) return 'Selecciona una cuenta primero';
         const p = this.productos.find((x) => x.sku === sku);
         if (!p) return 'Producto no encontrado';
@@ -252,6 +258,7 @@ export class CajaViewModel {
             p.sku,
             '1',
             this.edadConfirmadaSesion,
+            modoVenta,
         );
         this.cuentaSeleccionada = actualizada;
         this.cuentas = this.cuentas.map((c) => (c.ventaId === actualizada.ventaId ? actualizada : c));

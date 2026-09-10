@@ -151,6 +151,8 @@ export interface ProductoInfo {
     unidad?: 'un' | 'kg' | 'ml';
     esCaja?: boolean;
     unidadesPorCaja?: number;
+    precioPaqueteUsd?: string;
+    nombrePaquete?: string;
 }
 
 export interface LineaTicket {
@@ -161,6 +163,7 @@ export interface LineaTicket {
     tasaBloqueada: string;
     subtotalUsd: string;
     subtotalBs: string;
+    modoVenta?: string;
 }
 
 export type MonedaMetodo = 'USD' | 'BS';
@@ -668,6 +671,7 @@ class MockDemoStorage {
         rojoMax: 5,
         amarilloMax: 15,
     };
+    dedupVentas: Record<string, string> = {};
     historicoTasas: RegistroHistoricoTasa[] = [
         { id: 'tx-1', valor: '807.3900', fechaHora: 'Hoy, 04:00 PM', tipo: 'automático', motivo: 'Sondeo oficial BCV' },
         { id: 'tx-2', valor: '805.2000', fechaHora: 'Hoy, 09:00 AM', tipo: 'automático', motivo: 'Apertura de jornada' },
@@ -983,6 +987,8 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
                 unidad,
                 esCaja,
                 unidadesPorCaja,
+                precioPaqueteUsd: input?.precioPaqueteUsd ? String(input.precioPaqueteUsd) : undefined,
+                nombrePaquete: input?.nombrePaquete ? String(input.nombrePaquete) : undefined,
             };
             demoStore.productos.push(nuevo);
             demoStore.persist();
@@ -995,20 +1001,27 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
             return Promise.resolve(undefined as unknown as T);
         }
         case 'registrar_venta': {
-            const items = args?.items as { sku: string; cantidad: string }[];
+            const items = args?.items as { sku: string; cantidad: string; modo_venta?: string }[];
+            const idempotencyKey = args?.idempotencyKey as string | undefined;
             const recibido = Number(args?.montoRecibidoBs || '0');
+            
+            // Idempotency check for demo store
+            if (idempotencyKey && demoStore.dedupVentas?.[idempotencyKey]) {
+                const existing = demoStore.dedupVentas[idempotencyKey];
+                return demoStore.tickets.find(t => t.ventaId === existing);
+            }
             let totalUsd = 0;
             const tasa = Number(demoStore.tasaActual.valor);
             items.forEach((item) => {
                 const prod = demoStore.productos.find((p) => p.sku === item.sku);
                 if (prod) {
                     const cant = Number(item.cantidad);
-                    let unidades = cant;
-                    if (prod.esCaja && prod.unidadesPorCaja && prod.unidadesPorCaja > 1) {
-                        unidades = cant * prod.unidadesPorCaja;
-                    }
-                    totalUsd += Number(prod.precioUsd) * unidades;
-                    prod.stock = String(Math.max(0, Number(prod.stock) - unidades));
+                    const modo = item.modo_venta || 'unidad';
+                    const esPaquete = modo === 'paquete' && prod.precioPaqueteUsd;
+                    const precioEfectivo = esPaquete ? Number(prod.precioPaqueteUsd) : Number(prod.precioUsd);
+                    const unidadesBase = esPaquete ? (prod.unidadesPorCaja || 1) : 1;
+                    totalUsd += precioEfectivo * cant;
+                    prod.stock = String(Math.max(0, Number(prod.stock) - unidadesBase * cant));
                 }
             });
             const totalBs = totalUsd * tasa;
@@ -1054,20 +1067,31 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
                 tasaVuelto,
                 lineas: items.map((i) => {
                     const p = demoStore.productos.find((x) => x.sku === i.sku);
-                    const subUsd = (Number(p?.precioUsd || 0) * Number(i.cantidad)).toFixed(2);
+                    const modo = (i as any).modo_venta || 'unidad';
+                    const esPaquete = modo === 'paquete' && p?.precioPaqueteUsd;
+                    const precioEfectivo = esPaquete ? Number(p?.precioPaqueteUsd || 0) : Number(p?.precioUsd || 0);
+                    const subUsd = (precioEfectivo * Number(i.cantidad)).toFixed(2);
                     const subBs = (Number(subUsd) * tasa).toFixed(2);
                     return {
                         sku: i.sku,
                         nombre: p?.nombre || i.sku,
                         cantidad: i.cantidad,
-                        precioUsd: p?.precioUsd || '0',
+                        precioUsd: String(precioEfectivo),
                         tasaBloqueada: tasa.toFixed(2),
                         subtotalUsd: subUsd,
                         subtotalBs: subBs,
+                        modoVenta: modo,
                     };
                 }),
             };
-            demoStore.tickets.unshift(ticket);
+            if (!demoStore.tickets.some(t => t.ventaId === ticket.ventaId)) {
+                demoStore.tickets.unshift(ticket);
+            }
+            // Store idempotency key for dedup
+            if (idempotencyKey) {
+                if (!demoStore.dedupVentas) demoStore.dedupVentas = {};
+                demoStore.dedupVentas[idempotencyKey] = ticket.ventaId;
+            }
             if (demoStore.jornadaActual) {
                 const j = demoStore.jornadaActual;
                 j.ventasTotalUsd = (parseNum(j.ventasTotalUsd) + totalUsd).toFixed(2);
@@ -1115,13 +1139,14 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
             const ventaId = String(args?.ventaId || '');
             const sku = String(args?.sku || '').trim().toUpperCase();
             const cant = parseNum(args?.cantidad) || 1;
+            const modo = String(args?.modo_venta || 'unidad');
             const cuenta = demoStore.cuentas.find((c) => c.ventaId === ventaId);
             const prod = demoStore.productos.find((p) => p.sku.trim().toUpperCase() === sku);
             if (cuenta && prod) {
-                let unidades = cant;
-                if (prod.esCaja && prod.unidadesPorCaja && prod.unidadesPorCaja > 1) {
-                    unidades = cant * prod.unidadesPorCaja;
-                }
+                const esPaquete = modo === 'paquete' && prod.precioPaqueteUsd;
+                const precioEfectivo = esPaquete ? parseNum(prod.precioPaqueteUsd) : parseNum(prod.precioUsd);
+                const unidadesBase = esPaquete ? (prod.unidadesPorCaja || 1) : 1;
+                const unidades = cant * unidadesBase;
                 if (!prod.sinStock) {
                     const st = parseNum(prod.stock);
                     if (st < unidades) {
@@ -1131,11 +1156,10 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
                 }
 
                 if (!Array.isArray(cuenta.consumos)) cuenta.consumos = [];
-                const precioU = parseNum(prod.precioUsd);
-                const subUsd = precioU * cant;
+                const subUsd = precioEfectivo * cant;
                 const tasa = parseNum(demoStore.tasaActual.valor) || 807.39;
 
-                const existente = cuenta.consumos.find((x) => x.sku.trim().toUpperCase() === prod.sku.trim().toUpperCase());
+                const existente = cuenta.consumos.find((x) => x.sku.trim().toUpperCase() === prod.sku.trim().toUpperCase() && x.modoVenta === modo);
                 if (existente) {
                     existente.cantidad += cant;
                     existente.subtotalUsd = (existente.cantidad * parseNum(existente.precioUsd)).toFixed(2);
@@ -1145,8 +1169,9 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
                         sku: prod.sku,
                         nombre: prod.nombre,
                         cantidad: cant,
-                        precioUsd: precioU.toFixed(2),
+                        precioUsd: precioEfectivo.toFixed(2),
                         subtotalUsd: subUsd.toFixed(2),
+                        modoVenta: modo,
                     });
                 }
                 const nuevoTotU = cuenta.consumos.reduce((acc, it) => acc + parseNum(it.subtotalUsd), 0);
@@ -1186,7 +1211,12 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
         case 'cerrar_cuenta': {
             const ventaId = String(args?.ventaId || '');
             const idx = demoStore.cuentas.findIndex((c) => c.ventaId === ventaId);
-            const cuenta = idx !== -1 ? demoStore.cuentas[idx] : null;
+            if (idx === -1) {
+                const existingTicket = demoStore.tickets.find(t => t.ventaId === ventaId);
+                if (existingTicket) return Promise.resolve(existingTicket as unknown as T);
+                return Promise.reject(new Error('Cuenta no encontrada'));
+            }
+            const cuenta = demoStore.cuentas[idx];
             let totalUsd = '0.00';
             let totalBs = '0.00';
             let lineas: LineaTicket[] = [];
@@ -1367,8 +1397,21 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
             const tasa = Number(demoStore.tasaActual.valor);
             const totalVentasUsd = demoStore.ventasTotalUsd;
             const totalVentasBs = demoStore.ventasTotalBs;
-            // Cálculo financiero: margen promedio del 30% e impuestos del 12% sobre ventas
-            const costoTotalUsd = totalVentasUsd * 0.65;
+
+            let totalVentaCatalogoUsd = 0;
+            let totalCostoCatalogoUsd = 0;
+            demoStore.productos.forEach((p) => {
+                const precioVenta = Number(p.precioUsd) || 0;
+                const precioBruto = Number(p.precioBrutoUsd) || 0;
+                if (precioVenta > 0) {
+                    totalVentaCatalogoUsd += precioVenta;
+                    totalCostoCatalogoUsd += precioBruto > 0 ? precioBruto : precioVenta * 0.65;
+                }
+            });
+            const margenPromedio = totalVentaCatalogoUsd > 0
+                ? (totalVentaCatalogoUsd - totalCostoCatalogoUsd) / totalVentaCatalogoUsd
+                : 0.35;
+            const costoTotalUsd = totalVentasUsd * (1 - margenPromedio);
             const gananciaBrutaUsd = totalVentasUsd - costoTotalUsd;
             const impuestosUsd = totalVentasUsd * 0.12;
             const gananciaNetaUsd = gananciaBrutaUsd - impuestosUsd;
@@ -1617,7 +1660,9 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
         }
         case 'generar_qr_panel': {
             const roomId = 'room-' + Math.random().toString(36).slice(2, 10);
-            const url = `http://127.0.0.1:4000/panel?room=${roomId}`;
+            const signalingBase = (window as any).__SIGNALING_URL__
+                || 'https://datiolabs-signaling.<tu-subdominio>.workers.dev';
+            const url = `${signalingBase}/ws/signaling?room=${roomId}`;
             return Promise.resolve({ url, qrBase64: '', roomId } as unknown as T);
         }
         case 'obtener_tasa_bcv':
@@ -1753,8 +1798,16 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
         }
         case 'obtener_jornada_actual':
             return Promise.resolve(demoStore.jornadaActual as unknown as T);
-        case 'listar_historico_jornadas':
-            return Promise.resolve(demoStore.historicoJornadas as unknown as T);
+        case 'listar_historico_jornadas': {
+            // Deduplicate by jornada ID
+            const seen = new Set<string>();
+            const deduplicated = demoStore.historicoJornadas.filter((j) => {
+                if (seen.has(j.id)) return false;
+                seen.add(j.id);
+                return true;
+            });
+            return Promise.resolve(deduplicated as unknown as T);
+        }
         case 'abrir_jornada': {
             const operador = String(args?.operador || 'Cajero Principal').trim();
             const operadoresLista: string[] = Array.isArray(args?.operadores) && args.operadores.length > 0
@@ -1869,18 +1922,19 @@ export const api = {
     },
     eliminarProducto: (sku: string) => invocar<void>('eliminar_producto', { sku }),
     registrarVenta: (
-        items: { sku: string; cantidad: string }[],
+        items: { sku: string; cantidad: string; modo_venta?: string }[],
         mayor: boolean,
         recibido: string,
         pagos?: PagoTicket[],
         resolucionVuelto?: ResolucionVuelto,
+        idempotencyKey?: string,
     ) =>
-        invocar<Ticket>('registrar_venta', { items, clienteMayorEdad: mayor, montoRecibidoBs: recibido, pagos, resolucionVuelto }),
+        invocar<Ticket>('registrar_venta', { items, montoRecibidoBs: recibido, pagos, resolucionVuelto, idempotencyKey }),
     abrirCuenta: (etiqueta: string, tipo?: 'activa' | 'deuda', nota?: string, cliente?: string) =>
         invocar<CuentaAbierta>('abrir_cuenta', { etiqueta, tipo, nota, cliente }),
     cuentas: () => invocar<CuentaAbierta[]>('listar_cuentas'),
-    agregarConsumo: (ventaId: string, sku: string, cantidad: string, mayor: boolean) =>
-        invocar<CuentaAbierta>('agregar_consumo', { ventaId, sku, cantidad, clienteMayorEdad: mayor }),
+    agregarConsumo: (ventaId: string, sku: string, cantidad: string, mayor: boolean, modo_venta?: string) =>
+        invocar<CuentaAbierta>('agregar_consumo', { ventaId, sku, cantidad, clienteMayorEdad: mayor, modo_venta }),
     eliminarConsumo: (ventaId: string, consumoId: string) =>
         invocar<CuentaAbierta>('eliminar_consumo', { ventaId, consumoId }),
     abonarCuenta: (ventaId: string, montoUsd: number, montoBs?: number) =>

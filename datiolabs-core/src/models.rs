@@ -173,6 +173,10 @@ pub struct Producto {
     pub es_caja: bool,
     #[serde(default)]
     pub unidades_por_caja: Option<u32>,
+    #[serde(default, with = "serde_opt_decimal_str")]
+    pub precio_paquete_usd: Option<Decimal>,
+    #[serde(default)]
+    pub nombre_paquete: Option<String>,
 }
 
 /// Struct-of-Arrays catalog: column-contiguous layout saturating cache lines
@@ -192,6 +196,8 @@ pub struct Catalogo {
     unidades: Vec<Option<String>>,
     es_cajas: Vec<bool>,
     unidades_por_cajas: Vec<Option<u32>>,
+    precios_paquete_usd: Vec<Option<Decimal>>,
+    nombres_paquete: Vec<Option<String>>,
 }
 
 impl Catalogo {
@@ -227,6 +233,8 @@ impl Catalogo {
         self.unidades.push(p.unidad);
         self.es_cajas.push(p.es_caja);
         self.unidades_por_cajas.push(p.unidades_por_caja);
+        self.precios_paquete_usd.push(p.precio_paquete_usd);
+        self.nombres_paquete.push(p.nombre_paquete);
         Ok(idx)
     }
 
@@ -294,6 +302,14 @@ impl Catalogo {
         self.unidades_por_cajas[idx]
     }
 
+    pub fn precio_paquete_usd(&self, idx: usize) -> Option<Decimal> {
+        self.precios_paquete_usd[idx]
+    }
+
+    pub fn nombre_paquete(&self, idx: usize) -> Option<String> {
+        self.nombres_paquete[idx].clone()
+    }
+
     /// Zero-copy in-place stock mutation over the contiguous column.
     /// Stock is clamped to zero minimum — never goes negative.
     pub fn aplicar_delta_stock(&mut self, idx: usize, delta: Decimal) {
@@ -324,6 +340,8 @@ impl Catalogo {
             unidad: self.unidades[idx].clone(),
             es_caja: self.es_cajas[idx],
             unidades_por_caja: self.unidades_por_cajas[idx],
+            precio_paquete_usd: self.precios_paquete_usd[idx],
+            nombre_paquete: self.nombres_paquete[idx].clone(),
         }
     }
 
@@ -348,6 +366,8 @@ pub struct LineasVenta {
     pub precios_usd: Vec<Decimal>,
     #[serde(with = "serde_vec_str")]
     pub tasas_bloqueadas: Vec<Decimal>,
+    #[serde(default)]
+    pub modos_venta: Vec<String>,
 }
 
 impl LineasVenta {
@@ -362,12 +382,14 @@ impl LineasVenta {
         cantidad: Decimal,
         precio_usd: Decimal,
         tasa_bloqueada: Decimal,
+        modo_venta: String,
     ) {
         self.skus.push(sku);
         self.nombres.push(nombre);
         self.cantidades.push(cantidad);
         self.precios_usd.push(precio_usd);
         self.tasas_bloqueadas.push(tasa_bloqueada);
+        self.modos_venta.push(modo_venta);
     }
 
     pub fn total_usd(&self) -> Decimal {

@@ -882,6 +882,7 @@ mod tests {
             dec!(2),
             dec!(5),
             tasa,
+            "unidad".to_string(),
         );
         crate::models::Venta {
             id: id.to_string(),
@@ -991,6 +992,7 @@ mod tests {
             dec!(1),
             dec!(7),
             dec!(101),
+            "unidad".to_string(),
         );
         abierta.total_usd = abierta.lineas.total_usd();
         db.guardar_venta(abierta).unwrap();

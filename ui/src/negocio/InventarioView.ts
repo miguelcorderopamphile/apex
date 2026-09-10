@@ -97,7 +97,7 @@ export class InventarioView {
     private paginaCat: number = 1;
     private paginaRepo: number = 1;
 
-    constructor(contenedor: HTMLElement, modelo: NegocioModel) {
+    constructor(contenedor: HTMLElement, modelo: NegocioModel, private duenoAutenticado: boolean = true) {
         this.contenedor = contenedor;
         this.modelo = modelo;
         void this.modelo;
@@ -149,12 +149,16 @@ export class InventarioView {
 
         const placeholderProducto = 'Ej: Artículo Comercial 1L, Presentación 500g, Pack Estándar...';
 
+        const privacidad = this.modelo.getConfig()?.privacidadInventario;
+        const ocultarStock = privacidad && !this.duenoAutenticado;
+
         this.contenedor.innerHTML = `
         <div class="mb-4 sm:mb-6 flex flex-wrap items-center justify-between gap-3">
             <div>
                 <h2 class="text-2xl sm:text-3xl font-black font-heading">Control de Inventario</h2>
                 <p class="text-brand-text font-body text-xs sm:text-sm">Alta de productos, reposición de mercancía, categorías y tasas tributarias</p>
             </div>
+            ${ocultarStock ? '<div class="bg-amber-100 border-2 border-amber-400 rounded px-3 py-1 text-xs font-bold text-amber-800">MODO OPERADOR — Stock oculto. Acceda como administrador para ver existencias.</div>' : ''}
             <div class="flex items-center gap-1 overflow-x-auto max-w-full pb-1" id="inv-tabs-container">
                 <div class="inline-flex border-2 border-brand-black rounded bg-white shadow-brutal-sm p-0.5" id="inv-tabs">
                     <button id="tab-alta" class="w-36 sm:w-48 h-9 flex items-center justify-center font-heading text-xs rounded transition-colors shrink-0 ${this.tabActiva === 'alta' ? 'font-black bg-brand-black text-white' : 'font-bold text-brand-black hover:bg-gray-100'}">AÑADIR PRODUCTO</button>
@@ -238,6 +242,24 @@ export class InventarioView {
                                 <label class="block text-[11px] font-bold uppercase text-gray-700 mb-0.5">Ingresar Stock Inicial en Cajas</label>
                                 <input id="prod-stock-cajas" type="number" min="0" max="9999" step="1" placeholder="Ej: 5 cajas" class="w-full border-2 border-brand-black rounded px-3 py-1.5 font-bold bg-white text-sm" />
                                 <span class="text-[10px] text-gray-500">Convierte automáticamente a unidades base</span>
+                            </div>
+                        </div>
+                        <div class="pt-2 border-t border-gray-300">
+                            <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+                                <input id="prod-tiene-paquete" type="checkbox" class="w-4 h-4 border-2 border-brand-purple rounded text-brand-purple focus:ring-0" />
+                                <span class="font-bold text-xs sm:text-sm">¿Tiene precio por paquete / caja?</span>
+                            </label>
+                            <div id="box-paquete-config" class="hidden grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                                <div>
+                                    <label class="block text-[11px] font-bold uppercase text-gray-700 mb-0.5">Nombre del Empaque *</label>
+                                    <input id="prod-nombre-paquete" type="text" maxlength="30" placeholder="Ej: Caja, Tobo, Bolsa" class="w-full border-2 border-brand-purple rounded px-3 py-1.5 font-bold bg-white text-sm" />
+                                    <span class="text-[10px] text-gray-500">Nombre descriptivo del empaque</span>
+                                </div>
+                                <div>
+                                    <label class="block text-[11px] font-bold uppercase text-gray-700 mb-0.5">Precio por Empaque (USD) *</label>
+                                    <input id="prod-precio-paquete" type="number" min="0" step="0.01" placeholder="Ej: 25.00" class="w-full border-2 border-brand-purple rounded px-3 py-1.5 font-bold bg-white text-sm" />
+                                    <span class="text-[10px] text-gray-500">Precio de venta por empaque completo</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -517,6 +539,20 @@ export class InventarioView {
         if (inUnidadesCaja) sanitizarInputEntero(inUnidadesCaja, 2, 1000, 4, recalcularStockDesdeCajas);
         if (inStockCajas) sanitizarInputEntero(inStockCajas, 0, 9999, 4, recalcularStockDesdeCajas);
 
+        // Precio Paquete checkbox y configuración
+        const chkTienePaquete = document.getElementById('prod-tiene-paquete') as HTMLInputElement | null;
+        const boxPaqueteConfig = document.getElementById('box-paquete-config');
+        chkTienePaquete?.addEventListener('change', () => {
+            limpiarError();
+            if (boxPaqueteConfig) {
+                if (chkTienePaquete.checked) {
+                    boxPaqueteConfig.classList.remove('hidden');
+                } else {
+                    boxPaqueteConfig.classList.add('hidden');
+                }
+            }
+        });
+
         inStockCajas?.addEventListener('input', recalcularStockDesdeCajas);
         inUnidadesCaja?.addEventListener('input', recalcularStockDesdeCajas);
 
@@ -636,6 +672,8 @@ export class InventarioView {
                 : 'bg-red-100 text-red-900';
             const unitLabel = this.getUnitLabel(p);
             const catNombre = this.getNombreCategoria(p.categoriaId);
+            const privacidad = this.modelo.getConfig()?.privacidadInventario;
+            const ocultarStock = privacidad && !this.duenoAutenticado;
             return `
             <div class="border border-brand-black rounded p-2 bg-gray-50 flex justify-between items-center text-xs">
                 <div class="min-w-0 flex-1 pr-2">
@@ -646,7 +684,7 @@ export class InventarioView {
                 </div>
                 <div class="text-right shrink-0">
                     <span class="font-black px-2 py-0.5 rounded border border-brand-black text-[10px] inline-block ${badgeClass}">
-                        ${p.sinStock ? 'LIBRE' : (p.esCaja && p.unidadesPorCaja && p.unidadesPorCaja > 1 ? `${Math.floor(st / p.unidadesPorCaja)} cj. + ${st % p.unidadesPorCaja} un. (${st} un.)` : `${st} ${unitLabel}`)}
+                        ${ocultarStock ? '<span class="text-gray-400">•••</span>' : (p.sinStock ? 'LIBRE' : (p.esCaja && p.unidadesPorCaja && p.unidadesPorCaja > 1 ? `${Math.floor(st / p.unidadesPorCaja)} cj. + ${st % p.unidadesPorCaja} un. (${st} un.)` : `${st} ${unitLabel}`))}
                     </span>
                 </div>
             </div>`;
@@ -722,6 +760,8 @@ export class InventarioView {
                 : p.esCaja && p.unidadesPorCaja && p.unidadesPorCaja > 1
                 ? `${Math.floor(st / p.unidadesPorCaja)} cajas y ${st % p.unidadesPorCaja} un. (${st} un.)`
                 : `${st} ${unitLabel}`;
+            const privacidad = this.modelo.getConfig()?.privacidadInventario;
+            const ocultarStock = privacidad && !this.duenoAutenticado;
             return `
             <div class="border-2 border-brand-black rounded-lg p-3 bg-white shadow-sm flex flex-col justify-between h-[175px] min-h-[175px] max-h-[175px] box-border overflow-hidden">
                 <div class="min-w-0">
@@ -732,10 +772,16 @@ export class InventarioView {
                         </div>
                         <button data-repo-del="${p.sku}" title="Eliminar producto del catálogo" class="w-5 h-5 rounded border border-brand-black text-red-600 hover:bg-red-600 hover:text-white flex items-center justify-center font-black text-xs shrink-0">&times;</button>
                     </div>
-                    <p class="text-xs font-bold text-gray-500 mt-0.5">Precio: $${Number(p.precioUsd).toFixed(2)} · Stock: <span class="font-black ${colorStock}">${textoStock}</span></p>
+                    <p class="text-xs font-bold text-gray-500 mt-0.5">Precio: $${Number(p.precioUsd).toFixed(2)} · Stock: <span class="font-black ${colorStock}">${ocultarStock ? '<span class="text-gray-400">•••</span>' : textoStock}</span></p>
                 </div>
                 ${p.sinStock ? '<p class="text-[11px] text-purple-700 font-bold mt-auto">Sin control de existencias físicas.</p>' : `
                 <div class="flex items-center gap-1 mt-auto pt-2 border-t border-gray-100">
+                    ${p.esCaja && p.unidadesPorCaja && p.unidadesPorCaja > 1 ? `
+                        <select data-repo-tipo="${p.sku}" class="h-8 border-2 border-brand-black rounded px-1 py-0.5 font-bold text-[10px] shrink-0 bg-white">
+                            <option value="unidad">Unidad</option>
+                            <option value="caja">Caja (${p.unidadesPorCaja} un.)</option>
+                        </select>
+                    ` : ''}
                     <input type="number" step="${unitLabel === 'kg' || unitLabel === 'ml' ? '0.1' : '1'}" min="${unitLabel === 'kg' || unitLabel === 'ml' ? '0.01' : '1'}" max="9999" maxlength="5" placeholder="Cant." data-repo-cant="${p.sku}" class="w-14 h-8 border-2 border-brand-black rounded px-1.5 py-0.5 font-bold text-xs shrink-0" />
                     <button data-repo-in="${p.sku}" title="Sumar stock por reposición de compra" class="h-8 bg-green-200 hover:bg-green-300 border border-brand-black rounded px-1.5 text-[10px] font-black font-heading flex-1 truncate shrink-0">+ ENTRADA</button>
                     <button data-repo-red="${p.sku}" title="Reducir stock por ajuste de inventario regular" class="h-8 bg-amber-200 hover:bg-amber-300 border border-brand-black rounded px-1.5 text-[10px] font-black font-heading flex-1 truncate shrink-0">- REDUCIR</button>
@@ -797,7 +843,15 @@ export class InventarioView {
                 const inp = box.querySelector<HTMLInputElement>(`input[data-repo-cant="${sku}"]`);
                 const cant = inp?.value;
                 if (sku && cant && Number(cant) > 0 && Number(cant) <= 9999) {
-                    void api.compraStock(sku, cant).then(() => {
+                    // Check if replenishment is by box or unit
+                    const tipoSelect = box.querySelector<HTMLSelectElement>(`select[data-repo-tipo="${sku}"]`);
+                    const tipo = tipoSelect?.value || 'unidad';
+                    const prod = this.productos.find((p) => p.sku === sku);
+                    let cantFinal = Number(cant);
+                    if (tipo === 'caja' && prod?.esCaja && prod?.unidadesPorCaja && prod.unidadesPorCaja > 1) {
+                        cantFinal = cantFinal * prod.unidadesPorCaja;
+                    }
+                    void api.compraStock(sku, String(cantFinal)).then(() => {
                         void api.productos().then((prods) => {
                             this.productos = prods;
                             this.renderRepoLista();
@@ -814,7 +868,15 @@ export class InventarioView {
                 const inp = box.querySelector<HTMLInputElement>(`input[data-repo-cant="${sku}"]`);
                 const cant = inp?.value;
                 if (sku && cant && Number(cant) > 0 && Number(cant) <= 9999) {
-                    void api.reducirStock(sku, cant).then(() => {
+                    // Check if reduction is by box or unit
+                    const tipoSelect = box.querySelector<HTMLSelectElement>(`select[data-repo-tipo="${sku}"]`);
+                    const tipo = tipoSelect?.value || 'unidad';
+                    const prod = this.productos.find((p) => p.sku === sku);
+                    let cantFinal = Number(cant);
+                    if (tipo === 'caja' && prod?.esCaja && prod?.unidadesPorCaja && prod.unidadesPorCaja > 1) {
+                        cantFinal = cantFinal * prod.unidadesPorCaja;
+                    }
+                    void api.reducirStock(sku, String(cantFinal)).then(() => {
                         void api.productos().then((prods) => {
                             this.productos = prods;
                             this.renderRepoLista();
@@ -831,11 +893,20 @@ export class InventarioView {
                 const inp = box.querySelector<HTMLInputElement>(`input[data-repo-cant="${sku}"]`);
                 const cant = inp?.value;
                 if (sku && cant && Number(cant) > 0 && Number(cant) <= 9999) {
-                    void api.merma(sku, cant, null).then(() => {
+                    // Check if merma is by box or unit
+                    const tipoSelect = box.querySelector<HTMLSelectElement>(`select[data-repo-tipo="${sku}"]`);
+                    const tipo = tipoSelect?.value || 'unidad';
+                    const prod = this.productos.find((p) => p.sku === sku);
+                    let cantFinal = Number(cant);
+                    if (tipo === 'caja' && prod?.esCaja && prod?.unidadesPorCaja && prod.unidadesPorCaja > 1) {
+                        cantFinal = cantFinal * prod.unidadesPorCaja;
+                    }
+                    void api.merma(sku, String(cantFinal), null).then(() => {
                         void api.productos().then((prods) => {
                             this.productos = prods;
                             this.renderRepoLista();
                             this.renderCatalogoLista();
+                        });
                         });
                     });
                 }
@@ -929,6 +1000,13 @@ export class InventarioView {
         const esCaja = chkEsCaja?.checked || false;
         const unidadesPorCaja = esCaja && inUnidadesCaja ? Math.max(2, parseInt(inUnidadesCaja.value, 10) || 12) : undefined;
 
+        const chkTienePaquete = document.getElementById('prod-tiene-paquete') as HTMLInputElement | null;
+        const inNombrePaquete = document.getElementById('prod-nombre-paquete') as HTMLInputElement | null;
+        const inPrecioPaquete = document.getElementById('prod-precio-paquete') as HTMLInputElement | null;
+        const tienePaquete = chkTienePaquete?.checked || false;
+        const nombrePaquete = tienePaquete && inNombrePaquete ? inNombrePaquete.value.trim() : undefined;
+        const precioPaqueteUsd = tienePaquete && inPrecioPaquete ? parseVal(inPrecioPaquete.value).toFixed(2) : undefined;
+
         try {
             await api.crearProducto({
                 nombre: inNombre.value.trim(),
@@ -944,6 +1022,8 @@ export class InventarioView {
                 alcoholica: false,
                 esCaja,
                 unidadesPorCaja,
+                precioPaqueteUsd,
+                nombrePaquete,
             });
 
             if (msgEl) {

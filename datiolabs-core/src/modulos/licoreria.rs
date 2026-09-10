@@ -38,6 +38,7 @@ mod tests {
             dec!(2),
             dec!(5),
             dec!(100),
+            "unidad".to_string(),
         );
         lineas.agregar(
             Sku::new("RON").unwrap(),
@@ -45,6 +46,7 @@ mod tests {
             dec!(1),
             dec!(6),
             dec!(110),
+            "unidad".to_string(),
         );
         let cierre = liquidar_cierre(&lineas);
         assert_eq!(cierre.total_usd, dec!(16));

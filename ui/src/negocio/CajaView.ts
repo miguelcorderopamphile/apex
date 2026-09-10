@@ -272,7 +272,7 @@ export class CajaView {
                     if (cb.value) nombres.push(cb.value);
                 });
                 if (nombres.length === 0) {
-                    alert('Debes seleccionar al menos un operador activo en turno.');
+                    this.mostrarToast('Debes seleccionar al menos un operador activo en turno.', 'error');
                     return;
                 }
                 await api.asignarOperadoresTurno(nombres);
@@ -351,7 +351,7 @@ export class CajaView {
                     if (cb.value) nombres.push(cb.value);
                 });
                 if (nombres.length === 0) {
-                    alert('Selecciona al menos un operador para abrir el turno.');
+                    this.mostrarToast('Selecciona al menos un operador para abrir el turno.', 'error');
                     return;
                 }
                 const primerOperador = nombres[0];
@@ -1028,7 +1028,10 @@ export class CajaView {
             });
 
             // Confirmar cobro
+            let procesandoCobro = false;
             this.modal.querySelector('#btn-confirmar-cobro')?.addEventListener('click', () => {
+                if (procesandoCobro) return;
+                procesandoCobro = true;
                 void (async () => {
                     const errEl = this.modal.querySelector<HTMLDivElement>('#cobro-error');
                     try {
@@ -1074,6 +1077,7 @@ export class CajaView {
                         this.cerrarModal();
                         this.modalTicketExito(ticket, totalRecibidoBs);
                     } catch (e) {
+                        procesandoCobro = false;
                         if (errEl) {
                             errEl.textContent = e instanceof Error ? e.message.replace(/"/g, '') : String(e);
                             errEl.classList.remove('hidden');
@@ -1185,33 +1189,46 @@ export class CajaView {
                     textoStock = `${stockNum} ${unidadStr}`;
                 }
 
+                const tienePaquete = p.precioPaqueteUsd && p.nombrePaquete;
+
                 return `
-                <button data-sku="${p.sku}" ${sinStock && !p.sinStock ? 'disabled' : ''}
-                    class="text-left border-2 border-brand-black rounded p-3 bg-white shadow-brutal hover:-translate-y-0.5 hover:shadow-brutal-hover transition-all active:translate-y-0.5 active:shadow-none disabled:opacity-30">
-                    <div class="flex justify-between items-start mb-1 gap-1">
-                        <span class="font-heading font-extrabold leading-tight text-sm text-brand-black truncate" title="${p.nombre}">${p.nombre}</span>
-                        <div class="flex gap-1 shrink-0">
-                            ${badgeUnidad ? `<span class="text-[9px] font-black bg-amber-100 text-amber-900 border border-brand-black rounded px-1 lowercase">${badgeUnidad}</span>` : ''}
+                <div class="relative" data-producto-card="${p.sku}">
+                    <button data-sku="${p.sku}" data-modo="unidad" ${sinStock && !p.sinStock ? 'disabled' : ''}
+                        class="text-left border-2 border-brand-black rounded p-3 bg-white shadow-brutal hover:-translate-y-0.5 hover:shadow-brutal-hover transition-all active:translate-y-0.5 active:shadow-none disabled:opacity-30 w-full">
+                        <div class="flex justify-between items-start mb-1 gap-1">
+                            <span class="font-heading font-extrabold leading-tight text-sm text-brand-black truncate" title="${p.nombre}">${p.nombre}</span>
+                            <div class="flex gap-1 shrink-0">
+                                ${badgeUnidad ? `<span class="text-[9px] font-black bg-amber-100 text-amber-900 border border-brand-black rounded px-1 lowercase">${badgeUnidad}</span>` : ''}
+                            </div>
                         </div>
-                    </div>
-                    <p class="font-heading font-black text-lg text-brand-purple">Bs. ${this.modelo.bs(p.precioUsd)}</p>
-                    <div class="flex justify-between items-center mt-1">
-                        <span class="text-xs font-bold text-gray-600">$${Number(p.precioUsd).toFixed(2)}</span>
-                        <span class="text-[11px] font-black ${colorStockClass}">
-                            ${textoStock}
-                        </span>
-                    </div>
-                </button>`;
+                        <p class="font-heading font-black text-lg text-brand-purple">Bs. ${this.modelo.bs(p.precioUsd)}</p>
+                        <div class="flex justify-between items-center mt-1">
+                            <span class="text-xs font-bold text-gray-600">$${Number(p.precioUsd).toFixed(2)}</span>
+                            <span class="text-[11px] font-black ${colorStockClass}">
+                                ${textoStock}
+                            </span>
+                        </div>
+                    </button>
+                    ${tienePaquete ? `
+                    <button data-sku="${p.sku}" data-modo="paquete" ${sinStock && !p.sinStock ? 'disabled' : ''}
+                        class="text-left border-2 border-brand-purple rounded p-2 bg-purple-50 shadow-brutal hover:-translate-y-0.5 hover:shadow-brutal-hover transition-all active:translate-y-0.5 active:shadow-none disabled:opacity-30 w-full mt-1">
+                        <div class="flex justify-between items-center">
+                            <span class="font-heading font-bold text-xs text-purple-800">${p.nombrePaquete} ($${Number(p.precioPaqueteUsd).toFixed(2)})</span>
+                            <span class="text-[10px] font-black text-purple-600">${p.unidadesPorCaja || 1} un.</span>
+                        </div>
+                    </button>` : ''}
+                </div>`;
             })
             .join('');
 
         grid.querySelectorAll('button[data-sku]').forEach((btn) =>
             btn.addEventListener('click', () => {
                 const sku = (btn as HTMLElement).dataset.sku ?? '';
+                const modo = ((btn as HTMLElement).dataset.modo || 'unidad') as 'unidad' | 'paquete';
                 void (async () => {
                     const err = this.vm.modoCuentaAbierta
-                        ? await this.vm.agregarACuenta(sku)
-                        : await this.vm.agregar(sku);
+                        ? await this.vm.agregarACuenta(sku, modo)
+                        : await this.vm.agregar(sku, modo);
                     if (err) this.mostrarError(err);
                 })();
             }),
@@ -1228,7 +1245,10 @@ export class CajaView {
                     <div class="border-2 border-brand-black rounded p-2 bg-white shadow-sm space-y-1">
                         <div class="flex items-center gap-2">
                             <div class="flex-1 min-w-0 pr-2">
-                                <p class="font-heading font-bold text-sm truncate" title="${l.nombre}">${l.nombre}</p>
+                                <p class="font-heading font-bold text-sm truncate" title="${l.nombre}">
+                                    ${l.nombre}
+                                    ${l.modoVenta === 'paquete' ? '<span class="inline-block ml-1 text-[9px] font-black bg-purple-100 text-purple-800 border border-brand-purple rounded px-1">paquete</span>' : ''}
+                                </p>
                                 <p class="text-xs text-gray-600 font-bold">$${l.precioUsd.toFixed(2)} · Bs. ${this.modelo.bs(Number((l.precioUsd * l.cantidad).toFixed(2)))}</p>
                             </div>
                             ${l.pesable
@@ -1328,5 +1348,19 @@ export class CajaView {
                 if (err) this.mostrarError(err);
             }),
         );
+    }
+
+    private mostrarToast(mensaje: string, tipo: 'success' | 'error' | 'info' = 'info'): void {
+        const colores = {
+            success: 'bg-emerald-600 text-white',
+            error: 'bg-red-600 text-white',
+            info: 'bg-brand-black text-white',
+        };
+        const toast = document.createElement('div');
+        toast.className = `fixed bottom-6 right-6 ${colores[tipo]} border-2 border-brand-black rounded shadow-brutal px-5 py-4 font-heading font-bold max-w-md z-[110]`;
+        toast.innerHTML = `${mensaje.replace(/"/g, '')} <button class="ml-3 underline font-black">cerrar</button>`;
+        toast.querySelector('button')?.addEventListener('click', () => toast.remove());
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 8000);
     }
 }

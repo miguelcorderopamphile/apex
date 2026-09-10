@@ -450,17 +450,27 @@ export class CuentasView {
                         <div id="cta-grid-prod" class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1">
                             ${this.productos.map((p) => {
                                 const agotado = !p.sinStock && (Number(p.stock) <= 0);
+                                const tienePaquete = p.precioPaqueteUsd && p.nombrePaquete;
                                 return `
-                                <button data-add-sku="${p.sku}" data-agotado="${agotado ? "1" : "0"}" class="text-left border-2 border-brand-black rounded p-2 transition-all text-xs font-bold ${agotado ? "bg-gray-100 opacity-60 cursor-not-allowed" : "bg-gray-50 hover:bg-white shadow-sm hover:shadow-brutal-sm"}">
-                                    <div class="flex justify-between items-start gap-1">
-                                        <p class="truncate flex-1" title="${p.nombre}">${p.nombre}</p>
-                                        ${agotado ? '<span class="bg-red-200 text-red-900 border border-red-400 text-[9px] font-black px-1 rounded">AGOTADO</span>' : ""}
-                                    </div>
-                                    <div class="flex justify-between items-center mt-1">
-                                        <p class="text-brand-black font-black">$${fmt(p.precioUsd)}</p>
-                                        <span class="text-[10px] ${agotado ? "text-red-700 font-black" : "text-gray-500"}">${fmtStock(p)}</span>
-                                    </div>
-                                </button>`;
+                                <div class="relative" data-producto-row="${p.sku}">
+                                    <button data-add-sku="${p.sku}" data-modo="unidad" data-agotado="${agotado ? "1" : "0"}" class="text-left border-2 border-brand-black rounded p-2 transition-all text-xs font-bold ${agotado ? "bg-gray-100 opacity-60 cursor-not-allowed" : "bg-gray-50 hover:bg-white shadow-sm hover:shadow-brutal-sm"} w-full">
+                                        <div class="flex justify-between items-start gap-1">
+                                            <p class="truncate flex-1" title="${p.nombre}">${p.nombre}</p>
+                                            ${agotado ? '<span class="bg-red-200 text-red-900 border border-red-400 text-[9px] font-black px-1 rounded">AGOTADO</span>' : ""}
+                                        </div>
+                                        <div class="flex justify-between items-center mt-1">
+                                            <p class="text-brand-black font-black">$${fmt(p.precioUsd)}</p>
+                                            <span class="text-[10px] ${agotado ? "text-red-700 font-black" : "text-gray-500"}">${fmtStock(p)}</span>
+                                        </div>
+                                    </button>
+                                    ${tienePaquete ? `
+                                    <button data-add-sku="${p.sku}" data-modo="paquete" data-agotado="${agotado ? "1" : "0"}" class="text-left border-2 border-brand-purple rounded p-1 transition-all text-[10px] font-bold mt-1 w-full ${agotado ? "bg-gray-100 opacity-60 cursor-not-allowed" : "bg-purple-50 hover:bg-purple-100 shadow-sm hover:shadow-brutal-sm"}">
+                                        <div class="flex justify-between items-center">
+                                            <span class="text-purple-800">${p.nombrePaquete} ($${Number(p.precioPaqueteUsd).toFixed(2)})</span>
+                                            <span class="text-purple-600">${p.unidadesPorCaja || 1} un.</span>
+                                        </div>
+                                    </button>` : ''}
+                                </div>`;
                             }).join("")}
                         </div>
                     </div>
@@ -540,7 +550,7 @@ export class CuentasView {
                     this.cuentaSeleccionada = actualizada;
                     void this.render();
                 } catch (e) {
-                    alert(e instanceof Error ? e.message : String(e));
+                    this.mostrarToast(e instanceof Error ? e.message : String(e), 'error');
                 }
             });
         });
@@ -557,17 +567,27 @@ export class CuentasView {
                 } else {
                     grid.innerHTML = filtrados.map((p) => {
                         const agotado = !p.sinStock && (Number(p.stock) <= 0);
+                        const tienePaquete = p.precioPaqueteUsd && p.nombrePaquete;
                         return `
-                        <button data-add-sku="${p.sku}" data-agotado="${agotado ? "1" : "0"}" class="text-left border-2 border-brand-black rounded p-2 transition-all text-xs font-bold ${agotado ? "bg-gray-100 opacity-60 cursor-not-allowed" : "bg-gray-50 hover:bg-white shadow-sm hover:shadow-brutal-sm"}">
-                            <div class="flex justify-between items-start gap-1">
-                                <p class="truncate flex-1" title="${p.nombre}">${p.nombre}</p>
-                                ${agotado ? '<span class="bg-red-200 text-red-900 border border-red-400 text-[9px] font-black px-1 rounded">AGOTADO</span>' : ""}
-                            </div>
-                            <div class="flex justify-between items-center mt-1">
-                                <p class="text-brand-black font-black">$${fmt(p.precioUsd)}</p>
-                                <span class="text-[10px] ${agotado ? "text-red-700 font-black" : "text-gray-500"}">${fmtStock(p)}</span>
-                            </div>
-                        </button>`;
+                        <div class="relative" data-producto-row="${p.sku}">
+                            <button data-add-sku="${p.sku}" data-modo="unidad" data-agotado="${agotado ? "1" : "0"}" class="text-left border-2 border-brand-black rounded p-2 transition-all text-xs font-bold ${agotado ? "bg-gray-100 opacity-60 cursor-not-allowed" : "bg-gray-50 hover:bg-white shadow-sm hover:shadow-brutal-sm"} w-full">
+                                <div class="flex justify-between items-start gap-1">
+                                    <p class="truncate flex-1" title="${p.nombre}">${p.nombre}</p>
+                                    ${agotado ? '<span class="bg-red-200 text-red-900 border border-red-400 text-[9px] font-black px-1 rounded">AGOTADO</span>' : ""}
+                                </div>
+                                <div class="flex justify-between items-center mt-1">
+                                    <p class="text-brand-black font-black">$${fmt(p.precioUsd)}</p>
+                                    <span class="text-[10px] ${agotado ? "text-red-700 font-black" : "text-gray-500"}">${fmtStock(p)}</span>
+                                </div>
+                            </button>
+                            ${tienePaquete ? `
+                            <button data-add-sku="${p.sku}" data-modo="paquete" data-agotado="${agotado ? "1" : "0"}" class="text-left border-2 border-brand-purple rounded p-1 transition-all text-[10px] font-bold mt-1 w-full ${agotado ? "bg-gray-100 opacity-60 cursor-not-allowed" : "bg-purple-50 hover:bg-purple-100 shadow-sm hover:shadow-brutal-sm"}">
+                                <div class="flex justify-between items-center">
+                                    <span class="text-purple-800">${p.nombrePaquete} ($${Number(p.precioPaqueteUsd).toFixed(2)})</span>
+                                    <span class="text-purple-600">${p.unidadesPorCaja || 1} un.</span>
+                                </div>
+                            </button>` : ''}
+                        </div>`;
                     }).join("");
                     this.vincularBotonesAgregar(grid);
                 }
@@ -592,9 +612,10 @@ export class CuentasView {
                 const el = btn as HTMLElement;
                 const sku = el.dataset.addSku || "";
                 const agotado = el.dataset.agotado === "1";
+                const modo = (el.dataset.modo || 'unidad') as 'unidad' | 'paquete';
 
                 if (agotado) {
-                    alert("Stock insuficiente: este producto no tiene existencias disponibles en inventario.");
+                    this.mostrarToast("Stock insuficiente: este producto no tiene existencias disponibles en inventario.", 'error');
                     return;
                 }
 
@@ -604,11 +625,12 @@ export class CuentasView {
                         sku,
                         "1",
                         true,
+                        modo,
                     );
                     this.cuentaSeleccionada = actualizada;
                     void this.render();
                 } catch (e) {
-                    alert(e instanceof Error ? e.message : String(e));
+                    this.mostrarToast(e instanceof Error ? e.message : String(e), 'error');
                 }
             });
         });
@@ -692,7 +714,7 @@ export class CuentasView {
                     cerrar();
                     void this.render();
                 } else {
-                    alert(esDeuda ? "Debe ingresar el nombre del cliente o empresa deudora." : "Debe ingresar un identificador válido para la cuenta.");
+                    this.mostrarToast(esDeuda ? "Debe ingresar el nombre del cliente o empresa deudora." : "Debe ingresar un identificador válido para la cuenta.", 'error');
                     inputNombre?.focus();
                 }
             });
@@ -1028,7 +1050,7 @@ export class CuentasView {
                 const abonoComputableUsd = tasaOficial > 0 ? aporteBs / tasaOficial : 0;
 
                 if (abonoComputableUsd <= 0 || !Number.isFinite(abonoComputableUsd)) {
-                    alert("Por favor ingrese un monto válido.");
+                    this.mostrarToast("Por favor ingrese un monto válido.", 'error');
                     return;
                 }
 
@@ -1217,7 +1239,7 @@ export class CuentasView {
             }
 
             if (!Number.isFinite(nuevoAboU) || nuevoAboU < 0 || nuevoAboU > 50000) {
-                alert("Monto inválido. Ingrese un valor entre $0.00 y $50,000.00 USD.");
+                this.mostrarToast("Monto inválido. Ingrese un valor entre $0.00 y $50,000.00 USD.", 'error');
                 return;
             }
 
@@ -1294,12 +1316,19 @@ export class CuentasView {
 
             const cerrar = () => { this.modal.innerHTML = ""; };
             this.modal.querySelector("#modal-liq-cancel")?.addEventListener("click", cerrar);
+            let procesandoCierre = false;
             this.modal.querySelector("#modal-liq-ok")?.addEventListener("click", async () => {
+                if (procesandoCierre) return;
                 if (!this.cuentaSeleccionada) return;
-                await api.cerrarCuenta(this.cuentaSeleccionada.ventaId, "0.00", tasaOficial.toFixed(4));
-                this.cuentaSeleccionada = null;
-                cerrar();
-                void this.render();
+                procesandoCierre = true;
+                try {
+                    await api.cerrarCuenta(this.cuentaSeleccionada.ventaId, "0.00", tasaOficial.toFixed(4));
+                    this.cuentaSeleccionada = null;
+                    cerrar();
+                    void this.render();
+                } catch (_) {
+                    procesandoCierre = false;
+                }
             });
             return;
         }
@@ -1975,7 +2004,10 @@ export class CuentasView {
             });
 
             // Confirmar liquidación
+            let procesandoLiquidacion = false;
             this.modal.querySelector('#modal-liq-ok')?.addEventListener('click', () => {
+                if (procesandoLiquidacion) return;
+                procesandoLiquidacion = true;
                 void (async () => {
                     if (!this.cuentaSeleccionada) return;
                     const errEl = this.modal.querySelector<HTMLDivElement>('#cobro-error-cuenta');
@@ -2030,6 +2062,7 @@ export class CuentasView {
                         this.modal.innerHTML = "";
                         void this.render();
                     } catch (e) {
+                        procesandoLiquidacion = false;
                         if (errEl) {
                             errEl.textContent = e instanceof Error ? e.message.replace(/"/g, '') : String(e);
                             errEl.classList.remove('hidden');
@@ -2040,5 +2073,19 @@ export class CuentasView {
         };
 
         renderModalLiquidacion();
+    }
+
+    private mostrarToast(mensaje: string, tipo: 'success' | 'error' | 'info' = 'info'): void {
+        const colores = {
+            success: 'bg-emerald-600 text-white',
+            error: 'bg-red-600 text-white',
+            info: 'bg-brand-black text-white',
+        };
+        const toast = document.createElement('div');
+        toast.className = `fixed bottom-6 right-6 ${colores[tipo]} border-2 border-brand-black rounded shadow-brutal px-5 py-4 font-heading font-bold max-w-md z-[110]`;
+        toast.innerHTML = `${mensaje.replace(/"/g, '')} <button class="ml-3 underline font-black">cerrar</button>`;
+        toast.querySelector('button')?.addEventListener('click', () => toast.remove());
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 8000);
     }
 }

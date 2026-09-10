@@ -59,6 +59,8 @@ export class PanelDuenoView {
     private jornadaActual: JornadaLaboral | null = null;
     private readonly POR_PAGINA_TRX = 20;
     private paginaTrx: number = 1;
+    private margenBrutoPct: number = 35;
+    private margenNetoPct: number = 23;
 
     constructor(
         contenedor: HTMLElement,
@@ -152,6 +154,24 @@ export class PanelDuenoView {
         });
     }
 
+    private calcularMargenes(): void {
+        if (this.productos.length === 0) return;
+        let totalVentaUsd = 0;
+        let totalCostoUsd = 0;
+        this.productos.forEach((p) => {
+            const precioVenta = parseNum(p.precioUsd);
+            const precioBruto = parseNum(p.precioBrutoUsd);
+            if (precioVenta > 0) {
+                totalVentaUsd += precioVenta;
+                totalCostoUsd += precioBruto > 0 ? precioBruto : precioVenta * 0.65;
+            }
+        });
+        if (totalVentaUsd > 0) {
+            this.margenBrutoPct = Math.round(((totalVentaUsd - totalCostoUsd) / totalVentaUsd) * 100);
+            this.margenNetoPct = Math.max(0, this.margenBrutoPct - 12);
+        }
+    }
+
     private obtenerTimestampTicket(t: Ticket): number {
         if (t.fechaUnix && t.fechaUnix > 0) return t.fechaUnix;
         if (t.fechaHora) {
@@ -219,6 +239,7 @@ export class PanelDuenoView {
         this.categorias = categorias;
         this.cuentas = cuentas;
         this.jornadaActual = jornada;
+        this.calcularMargenes();
 
         const ahora = new Date();
         const hace24h = new Date(ahora.getTime() - 86400000);
@@ -325,8 +346,8 @@ export class PanelDuenoView {
         <!-- Tarjetas KPI con Retícula Auto-Ajustable y Jerarquía de Monedas -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
             ${this.kpi('Ventas Totales', `<span id="kpi-ventas-usd" class="font-black text-brand-black">$ ${fmt(datos.ventas24hUsd)}</span>`, `<span id="kpi-ventas-bs" class="break-words font-black text-brand-purple" title="Bs. ${fmt(datos.ventas24hBs)}">Bs. ${fmtCompactoBs(datos.ventas24hBs)}</span>`, 'bg-amber-50', 'Facturación bruta cobrada en caja (USD y Bs. al cambio oficial)')}
-            ${this.kpi('Ganancia Bruta', `<span id="kpi-gan-bruta">$ ${fmt(datos.gananciaBrutaUsd || Number(datos.ventas24hUsd) * 0.35)}</span>`, 'Margen bruto comercial: 35.0%', 'bg-emerald-50', 'Ventas menos costo de adquisición de mercancía')}
-            ${this.kpi('Ganancia Neta', `<span id="kpi-gan-neta">$ ${fmt(datos.gananciaNetaUsd || Number(datos.ventas24hUsd) * 0.23)}</span>`, `<span id="kpi-gan-neta-bs" class="break-words" title="Bs. ${this.modelo.bs(Number(datos.ventas24hUsd) * 0.23)}">Bs. ${fmtCompactoBs(this.modelo.bs(Number(datos.ventas24hUsd) * 0.23))}</span>`, 'bg-blue-50', 'Utilidad líquida real después de descontar impuestos')}
+            ${this.kpi('Ganancia Bruta', `<span id="kpi-gan-bruta">$ ${fmt(datos.gananciaBrutaUsd || Number(datos.ventas24hUsd) * this.margenBrutoPct / 100)}</span>`, `Margen bruto comercial: ${this.margenBrutoPct.toFixed(1)}%`, 'bg-emerald-50', 'Ventas menos costo de adquisición de mercancía')}
+            ${this.kpi('Ganancia Neta', `<span id="kpi-gan-neta">$ ${fmt(datos.gananciaNetaUsd || Number(datos.ventas24hUsd) * this.margenNetoPct / 100)}</span>`, `<span id="kpi-gan-neta-bs" class="break-words" title="Bs. ${this.modelo.bs(Number(datos.ventas24hUsd) * this.margenNetoPct / 100)}">Bs. ${fmtCompactoBs(this.modelo.bs(Number(datos.ventas24hUsd) * this.margenNetoPct / 100))}</span>`, 'bg-blue-50', 'Utilidad líquida real después de descontar impuestos')}
             ${this.kpi('Inventario Total', `$ ${fmt(datos.valorInventarioUsd)}`, `<span class="break-words" title="Bs. ${inventarioBs}">Bs. ${fmtCompactoBs(inventarioBs)}</span>`, 'bg-purple-50', 'Valoración monetaria total del stock físico actual disponible')}
         </div>
 
@@ -470,11 +491,11 @@ export class PanelDuenoView {
                         </div>
                         <div class="flex justify-between items-center py-1.5 border-b border-gray-200">
                             <span class="font-bold text-xs text-gray-600 uppercase">Margen Comercial Global</span>
-                            <span class="font-black font-heading text-base text-emerald-700">35.0% bruto</span>
+                            <span class="font-black font-heading text-base text-emerald-700">${Number(datos.ventas24hUsd) > 0 ? ((parseNum(datos.gananciaBrutaUsd) / Number(datos.ventas24hUsd)) * 100).toFixed(1) : '0.0'}% bruto</span>
                         </div>
                         <div class="flex justify-between items-center py-1.5 border-b border-gray-200">
                             <span class="font-bold text-xs text-gray-600 uppercase">Demanda Principal</span>
-                            <span class="font-black font-heading text-base text-blue-700">82.4% ingresos</span>
+                            <span class="font-black font-heading text-base text-blue-700">${datos.topProductos.length > 0 && Number(datos.ventas24hUsd) > 0 ? ((parseNum(datos.topProductos[0].totalUsd) / Number(datos.ventas24hUsd)) * 100).toFixed(1) : '0.0'}% ingresos</span>
                         </div>
                         <div class="flex justify-between items-center py-1.5 border-b border-gray-200">
                             <span class="font-bold text-xs text-gray-600 uppercase">Cuentas Activas</span>
@@ -794,7 +815,7 @@ export class PanelDuenoView {
                 : `Último cierre: ${j?.finStr || 'Sin jornadas'}`;
             const opsActivosNombres = (j?.operadoresActivos && j.operadoresActivos.length > 0)
                 ? j.operadoresActivos.join(', ')
-                : (j?.operadorActual || 'Sin operador asignado');
+                : (j?.operadorActual?.trim() || 'Sin operador asignado');
             if (opActivo) opActivo.textContent = opsActivosNombres;
             if (balanceTexto) balanceTexto.textContent = `$ ${fmt(j?.ventasTotalUsd || 0)} USD (Bs. ${fmt(j?.ventasTotalBs || 0)})`;
             if (ticketsTexto) ticketsTexto.textContent = `${j?.ticketsEmitidos || 0} tickets emitidos · ${j?.entradasStockReg || 0} reposiciones`;
@@ -823,7 +844,7 @@ export class PanelDuenoView {
                     const confirmacion = window.confirm('¿Confirmas el cierre de la jornada operativa actual? Se generará el balance consolidado del turno.');
                     if (confirmacion) {
                         const cerrada = await api.cerrarJornada();
-                        alert(`Jornada cerrada con éxito.\nIdentificador: ${cerrada.id}\nTotal Recaudado: $${cerrada.ventasTotalUsd} USD (Bs. ${cerrada.ventasTotalBs})`);
+                        this.mostrarToast(`Jornada cerrada con éxito. ID: ${cerrada.id} — $${cerrada.ventasTotalUsd} USD (Bs. ${cerrada.ventasTotalBs})`, 'success');
                         void refrescarModuloJornada();
                     }
                 });
@@ -904,7 +925,7 @@ export class PanelDuenoView {
         document.getElementById('btn-relevar-operador')?.addEventListener('click', async () => {
             const ops = (await api.listarOperadores()).filter(o => o.activo);
             if (ops.length === 0) {
-                alert('No hay operadores activos disponibles. Registre uno a continuación.');
+                this.mostrarToast('No hay operadores activos disponibles. Registre uno a continuación.', 'error');
                 return;
             }
             const j = await api.obtenerJornadaActual();
@@ -923,7 +944,7 @@ export class PanelDuenoView {
                     await api.asignarOperadoresTurno(seleccionados);
                     void refrescarModuloJornada();
                 } else if (elegidosPrompt.trim()) {
-                    alert('Ninguno de los nombres coincide con operadores registrados.');
+                    this.mostrarToast('Ninguno de los nombres coincide con operadores registrados.', 'error');
                 }
             }
         });
@@ -963,7 +984,7 @@ export class PanelDuenoView {
             const r = parseInt(inRojo?.value || '5', 10);
             const a = parseInt(inAmarillo?.value || '15', 10);
             if (r >= a) {
-                alert('El umbral rojo debe ser estrictamente menor que el umbral amarillo.');
+                this.mostrarToast('El umbral rojo debe ser estrictamente menor que el umbral amarillo.', 'error');
                 return;
             }
             await api.guardarSemaforoStock(r, a);
@@ -1050,8 +1071,19 @@ export class PanelDuenoView {
         const vUsd = filtradas.reduce((a, b) => a + parseNum(b.totalUsd), 0);
         const vBs = filtradas.reduce((a, b) => a + parseNum(b.totalBs), 0);
         const tCount = filtradas.length;
-        const ganBruta = vUsd * 0.35;
-        const ganNeta = vUsd * 0.23;
+
+        // Calculate real margin from product costs
+        let costoTotal = 0;
+        filtradas.forEach((t) => {
+            (t.lineas || []).forEach((l) => {
+                const prod = this.productos.find((p) => p.sku === l.sku);
+                if (prod) {
+                    costoTotal += parseNum(prod.precioBrutoUsd) * parseNum(l.cantidad);
+                }
+            });
+        });
+        const ganBruta = Math.max(0, vUsd - costoTotal);
+        const ganNeta = ganBruta * 0.95; // After taxes
         const ganNetaBs = ganNeta * (this.modelo.tasaActual || 807.39);
         const prom = tCount > 0 ? (vUsd / tCount).toFixed(2) : '0.00';
 
@@ -1148,11 +1180,10 @@ export class PanelDuenoView {
 
         let ms = 86400000;
         let desc = 'Últimas 24 Horas';
-        let mult = 1;
-        if (rango === '7d') { mult = 4.2; ms = 7 * 86400000; desc = 'Últimos 7 Días'; }
-        else if (rango === '30d') { mult = 14.5; ms = 30 * 86400000; desc = 'Últimos 30 Días'; }
-        else if (rango === '1a') { mult = 85.0; ms = 365 * 86400000; desc = 'Último Año (1A)'; }
-        else if (rango === 'todo') { mult = 120.0; ms = 5 * 365 * 86400000; desc = 'Histórico Consolidado (TODO)'; }
+        if (rango === '7d') { ms = 7 * 86400000; desc = 'Últimos 7 Días'; }
+        else if (rango === '30d') { ms = 30 * 86400000; desc = 'Últimos 30 Días'; }
+        else if (rango === '1a') { ms = 365 * 86400000; desc = 'Último Año (1A)'; }
+        else if (rango === 'todo') { ms = 5 * 365 * 86400000; desc = 'Histórico Consolidado (TODO)'; }
 
         const desdeDate = new Date(ahora.getTime() - ms);
         this.rangoDescripcion = desc;
@@ -1161,9 +1192,15 @@ export class PanelDuenoView {
         const filtradasRango = this.transacciones.filter((t) => this.obtenerTimestampTicket(t) >= tsDesde);
         this.transaccionesFiltradasRango = filtradasRango.length > 0 ? filtradasRango : this.transacciones.slice(0, 15);
 
-        const vUsd = Number(datosBase.ventas24hUsd) * mult;
-        const vBs = Number(datosBase.ventas24hBs) * mult;
-        const tCount = Math.round(datosBase.tickets24h * mult);
+        // Calculate totals from filtered transactions instead of multiplying 24h values
+        const tasaActual = this.modelo.tasaActual || 807.39;
+        let vUsd = 0;
+        let vBs = 0;
+        filtradasRango.forEach((t) => {
+            vUsd += parseNum(t.totalUsd);
+            vBs += parseNum(t.totalBs);
+        });
+        const tCount = filtradasRango.length;
 
         const elUsd = document.getElementById('kpi-ventas-usd');
         const elBs = document.getElementById('kpi-ventas-bs');
@@ -1179,23 +1216,45 @@ export class PanelDuenoView {
             elBs.title = 'Bs. ' + fmt(vBs);
         }
         if (elT) elT.textContent = String(tCount);
-        if (elGanBruta) elGanBruta.textContent = '$ ' + fmt(vUsd * 0.35);
-        if (elGanNeta) elGanNeta.textContent = '$ ' + fmt(vUsd * 0.23);
+        if (elGanBruta) elGanBruta.textContent = '$ ' + fmt(vUsd * this.margenBrutoPct / 100);
+        if (elGanNeta) elGanNeta.textContent = '$ ' + fmt(vUsd * this.margenNetoPct / 100);
         if (elGanNetaBs) {
-            const netoBs = vUsd * 0.23 * (this.modelo.tasaActual || 807.39);
+            const netoBs = vUsd * this.margenNetoPct / 100 * tasaActual;
             elGanNetaBs.textContent = 'Bs. ' + fmtCompactoBs(netoBs);
             elGanNetaBs.title = 'Bs. ' + fmt(netoBs);
         }
         if (elProm) elProm.textContent = '$ ' + (tCount > 0 ? (vUsd / tCount).toFixed(2) : '0.00');
 
+        // Build top products from filtered transactions
+        const productoMap = new Map<string, { nombre: string; cantidad: number; totalUsd: number }>();
+        filtradasRango.forEach((t) => {
+            t.lineas?.forEach((l) => {
+                const existing = productoMap.get(l.sku);
+                if (existing) {
+                    existing.cantidad += parseNum(l.cantidad);
+                    existing.totalUsd += parseNum(l.subtotalUsd);
+                } else {
+                    productoMap.set(l.sku, {
+                        nombre: l.nombre,
+                        cantidad: parseNum(l.cantidad),
+                        totalUsd: parseNum(l.subtotalUsd),
+                    });
+                }
+            });
+        });
+        const topProductosFiltrado = Array.from(productoMap.values())
+            .sort((a, b) => b.totalUsd - a.totalUsd)
+            .slice(0, 10)
+            .map((p) => ({
+                nombre: p.nombre,
+                cantidad: String(Math.round(p.cantidad)),
+                totalUsd: p.totalUsd > 0 ? String(p.totalUsd.toFixed(2)) : undefined,
+                porcentaje: vUsd > 0 ? ((p.totalUsd / vUsd) * 100).toFixed(1) : '0.0',
+            }));
+
         const datosSim: PanelDatos = {
             ...datosBase,
-            topProductos: datosBase.topProductos.map((t) => ({
-                nombre: t.nombre,
-                cantidad: String(Math.round(Number(t.cantidad) * mult)),
-                totalUsd: t.totalUsd ? String(Math.round(Number(t.totalUsd) * mult)) : undefined,
-                porcentaje: t.porcentaje,
-            })),
+            topProductos: topProductosFiltrado,
         };
         this.vm.setDatos(datosSim);
         void this.pintarGrafico(datosSim);
@@ -1330,9 +1389,9 @@ export class PanelDuenoView {
             second: '2-digit',
         });
         const tasaActual = this.modelo.tasaActual || 807.39;
-        const ganBruta = datos.gananciaBrutaUsd || Number(datos.ventas24hUsd) * 0.35;
-        const ganNeta = datos.gananciaNetaUsd || Number(datos.ventas24hUsd) * 0.23;
-        const ganNetaBs = Number(datos.ventas24hUsd) * 0.23 * tasaActual;
+        const ganBruta = datos.gananciaBrutaUsd || Number(datos.ventas24hUsd) * this.margenBrutoPct / 100;
+        const ganNeta = datos.gananciaNetaUsd || Number(datos.ventas24hUsd) * this.margenNetoPct / 100;
+        const ganNetaBs = Number(datos.ventas24hUsd) * this.margenNetoPct / 100 * tasaActual;
         const ticketProm = datos.tickets24h > 0 ? (Number(datos.ventas24hUsd) / datos.tickets24h).toFixed(2) : '0.00';
 
         const categoriasDinero = (datos.dineroPorCategoria && datos.dineroPorCategoria.length > 0)
@@ -1431,13 +1490,7 @@ export class PanelDuenoView {
             `;
         }).join('');
 
-        const ventanaImpresion = window.open('', '_blank', 'width=850,height=950');
-        if (!ventanaImpresion) {
-            alert('Por favor autoriza las ventanas emergentes para generar el documento PDF.');
-            return;
-        }
-
-        ventanaImpresion.document.write(`
+        const htmlContent = `
         <!DOCTYPE html>
         <html lang="es">
         <head>
@@ -1536,7 +1589,7 @@ export class PanelDuenoView {
                 <div class="kpi-card" style="background: #ecfdf5;">
                     <div class="kpi-label">Ganancia Bruta</div>
                     <div class="kpi-val">$ ${Number(ganBruta).toFixed(2)}</div>
-                    <div class="kpi-sub">Margen comercial 35.0%</div>
+                    <div class="kpi-sub">Margen comercial ${this.margenBrutoPct.toFixed(1)}%</div>
                 </div>
                 <div class="kpi-card" style="background: #eff6ff;">
                     <div class="kpi-label">Ganancia Neta</div>
@@ -1671,15 +1724,34 @@ export class PanelDuenoView {
                 <div>DatioLabs Enterprise Data Product · Integridad Transaccional Local-First Sled + SHA-256</div>
                 <div>Documento descargable e imprimible en formato PDF</div>
             </div>
-
-            <script>
-                window.onload = function() {
-                    window.print();
-                };
-            </script>
         </body>
         </html>
-        `);
-        ventanaImpresion.document.close();
+        `;
+
+        // Create blob and trigger download instead of using window.open()
+        const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Auditoria_${nombreNegocio.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.html`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        this.mostrarToast('Documento HTML descargado. Puedes abrirlo y guardarlo como PDF desde tu navegador.', 'success');
+    }
+
+    private mostrarToast(mensaje: string, tipo: 'success' | 'error' | 'info' = 'info'): void {
+        const colores = {
+            success: 'bg-emerald-600 text-white',
+            error: 'bg-red-600 text-white',
+            info: 'bg-brand-black text-white',
+        };
+        const toast = document.createElement('div');
+        toast.className = `fixed bottom-6 right-6 ${colores[tipo]} border-2 border-brand-black rounded shadow-brutal px-5 py-4 font-heading font-bold max-w-md z-[110]`;
+        toast.innerHTML = `${mensaje.replace(/"/g, '')} <button class="ml-3 underline font-black">cerrar</button>`;
+        toast.querySelector('button')?.addEventListener('click', () => toast.remove());
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 8000);
     }
 }
