@@ -60,7 +60,7 @@ class AppController {
 
         const urlParams = new URLSearchParams(window.location.search);
         const roomParam = urlParams.get('room');
-        if (roomParam) {
+        if (roomParam && !(window as any).__DATACHANNEL__) {
             await this.arrancarMovil(root, roomParam);
             return;
         }
