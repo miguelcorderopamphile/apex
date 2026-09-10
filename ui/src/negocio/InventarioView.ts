@@ -158,7 +158,7 @@ export class InventarioView {
                 <h2 class="text-2xl sm:text-3xl font-black font-heading">Control de Inventario</h2>
                 <p class="text-brand-text font-body text-xs sm:text-sm">Alta de productos, reposición de mercancía, categorías y tasas tributarias</p>
             </div>
-            ${ocultarStock ? '<div class="bg-amber-100 border-2 border-amber-400 rounded px-3 py-1 text-xs font-bold text-amber-800">MODO OPERADOR — Stock oculto. Acceda como administrador para ver existencias.</div>' : ''}
+            ${ocultarStock ? '<div class="bg-amber-100 border-2 border-amber-400 rounded px-3 py-1 text-xs font-bold text-amber-800">MODO OPERADOR — Precios y stock ocultos. Acceda como administrador para ver información sensible.</div>' : ''}
             <div class="flex items-center gap-1 overflow-x-auto max-w-full pb-1" id="inv-tabs-container">
                 <div class="inline-flex border-2 border-brand-black rounded bg-white shadow-brutal-sm p-0.5" id="inv-tabs">
                     <button id="tab-alta" class="w-36 sm:w-48 h-9 flex items-center justify-center font-heading text-xs rounded transition-colors shrink-0 ${this.tabActiva === 'alta' ? 'font-black bg-brand-black text-white' : 'font-bold text-brand-black hover:bg-gray-100'}">AÑADIR PRODUCTO</button>
@@ -679,7 +679,7 @@ export class InventarioView {
                 <div class="min-w-0 flex-1 pr-2">
                     <p class="font-bold truncate text-brand-black" title="${p.nombre}">${p.nombre}</p>
                     <p class="text-[10px] text-gray-500 font-bold">
-                        <span class="text-brand-purple font-black">${catNombre}</span> · $${Number(p.precioUsd).toFixed(2)} · IVA ${p.impuestoPct}%
+                        <span class="text-brand-purple font-black">${catNombre}</span> · ${ocultarStock ? '•••' : `$${Number(p.precioUsd).toFixed(2)}`} · IVA ${p.impuestoPct}%
                     </p>
                 </div>
                 <div class="text-right shrink-0">
@@ -772,7 +772,7 @@ export class InventarioView {
                         </div>
                         <button data-repo-del="${p.sku}" title="Eliminar producto del catálogo" class="w-5 h-5 rounded border border-brand-black text-red-600 hover:bg-red-600 hover:text-white flex items-center justify-center font-black text-xs shrink-0">&times;</button>
                     </div>
-                    <p class="text-xs font-bold text-gray-500 mt-0.5">Precio: $${Number(p.precioUsd).toFixed(2)} · Stock: <span class="font-black ${colorStock}">${ocultarStock ? '<span class="text-gray-400">•••</span>' : textoStock}</span></p>
+                    <p class="text-xs font-bold text-gray-500 mt-0.5">${ocultarStock ? 'Stock: <span class="font-black text-gray-400">•••</span>' : `Precio: $${Number(p.precioUsd).toFixed(2)} · Stock: <span class="font-black ${colorStock}">${textoStock}</span>`}</p>
                 </div>
                 ${p.sinStock ? '<p class="text-[11px] text-purple-700 font-bold mt-auto">Sin control de existencias físicas.</p>' : `
                 <div class="flex items-center gap-1 mt-auto pt-2 border-t border-gray-100">

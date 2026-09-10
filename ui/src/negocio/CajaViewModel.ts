@@ -120,8 +120,11 @@ export class CajaViewModel {
     }
 
     empujar(p: ProductoInfo, serie?: string, variante?: string, modoVenta: 'unidad' | 'paquete' = 'unidad'): string | null {
-        const esPaquete = modoVenta === 'paquete' && p.precioPaqueteUsd;
-        const precioEfectivo = esPaquete ? Number(p.precioPaqueteUsd) : Number(p.precioUsd);
+        const esPaquete = modoVenta === 'paquete' && (p.precioPaqueteUsd || (p.esCaja && p.unidadesPorCaja && p.unidadesPorCaja > 1));
+        const unidadesPaquete = esPaquete ? (p.unidadesPorCaja || 1) : 1;
+        const precioEfectivo = esPaquete
+            ? (p.precioPaqueteUsd ? Number(p.precioPaqueteUsd) : Number(p.precioUsd) * unidadesPaquete)
+            : Number(p.precioUsd);
         const pesable = !esPaquete && ((p.capacidades & CAP_PESABLE) !== 0 || p.unidad === 'kg' || p.unidad === 'ml');
         const paso = pesable ? 0.25 : 1;
         const existente = this.carrito.find((l) => l.sku === p.sku && l.serie === serie && l.variante === variante && l.modoVenta === modoVenta);
@@ -130,10 +133,9 @@ export class CajaViewModel {
 
         // Validación de stock: no permitir si no es servicio o venta libre
         if (!p.sinStock) {
-            const unidadesBase = esPaquete ? (p.unidadesPorCaja || 1) : 1;
             const stockDisponible = Number(p.stock);
-            if (stockDisponible < cantDeseada * unidadesBase) {
-                return `Stock insuficiente para ${p.nombre}. Disponible: ${stockDisponible}, Solicitado: ${cantDeseada * unidadesBase}`;
+            if (stockDisponible < cantDeseada * unidadesPaquete) {
+                return `Stock insuficiente para ${p.nombre}. Disponible: ${stockDisponible}, Solicitado: ${cantDeseada * unidadesPaquete}`;
             }
         }
 

@@ -1,4 +1,4 @@
-import { api, Categoria, CategoriaDineroBruto, CuentaAbierta, JornadaLaboral, MonedaMetodo, PanelDatos, ProductoInfo, RespaldoInfo, Ticket } from './api';
+import { api, Categoria, CategoriaDineroBruto, JornadaLaboral, MonedaMetodo, PanelDatos, ProductoInfo, RespaldoInfo, Ticket } from './api';
 import { NegocioModel } from './NegocioModel';
 
 export const parseNum = (n: unknown): number => {
@@ -17,7 +17,8 @@ export const parseNum = (n: unknown): number => {
 
 const fmt = (n: number | string | undefined | null): string => {
     const num = parseNum(n);
-    return num.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const rounded = Math.round((num + Number.EPSILON) * 100) / 100;
+    return rounded.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
 const fmtCompactoBs = (n: number | string | undefined | null): string => {
@@ -52,15 +53,12 @@ export class PanelDuenoView {
     private transacciones: Ticket[] = [];
     private productos: ProductoInfo[] = [];
     private categorias: Categoria[] = [];
-    private cuentas: CuentaAbierta[] = [];
-    private rangoDescripcion: string = 'Últimas 24 Horas';
     private rangoDetalleFechas: string = '';
-    private transaccionesFiltradasRango: Ticket[] = [];
     private jornadaActual: JornadaLaboral | null = null;
     private readonly POR_PAGINA_TRX = 20;
     private paginaTrx: number = 1;
-    private margenBrutoPct: number = 35;
-    private margenNetoPct: number = 23;
+    private margenBrutoPct: number = 0;
+    private margenNetoPct: number = 0;
 
     constructor(
         contenedor: HTMLElement,
@@ -163,7 +161,9 @@ export class PanelDuenoView {
             const precioBruto = parseNum(p.precioBrutoUsd);
             if (precioVenta > 0) {
                 totalVentaUsd += precioVenta;
-                totalCostoUsd += precioBruto > 0 ? precioBruto : precioVenta * 0.65;
+                if (precioBruto > 0) {
+                    totalCostoUsd += precioBruto;
+                }
             }
         });
         if (totalVentaUsd > 0) {
@@ -223,13 +223,12 @@ export class PanelDuenoView {
     }
 
     async render(): Promise<void> {
-        const [datos, respaldos, transacciones, productos, categorias, cuentas, jornada] = await Promise.all([
+        const [datos, respaldos, transacciones, productos, categorias, jornada] = await Promise.all([
             api.panel(),
             api.respaldos(),
             api.ventas(),
             api.productos(),
             api.categorias(),
-            api.cuentas(),
             api.obtenerJornadaActual(),
         ]);
         this.vm.setDatos(datos);
@@ -237,7 +236,6 @@ export class PanelDuenoView {
         this.transacciones = transacciones;
         this.productos = productos;
         this.categorias = categorias;
-        this.cuentas = cuentas;
         this.jornadaActual = jornada;
         this.calcularMargenes();
 
@@ -249,11 +247,7 @@ export class PanelDuenoView {
         });
 
         if (!this.rangoDetalleFechas) {
-            this.rangoDescripcion = 'Últimas 24 Horas';
             this.rangoDetalleFechas = `Del ${fmtFechaHora(hace24h)} al ${fmtFechaHora(ahora)}`;
-            const ts24h = Math.floor(hace24h.getTime() / 1000);
-            const filtradas24h = this.transacciones.filter((t) => this.obtenerTimestampTicket(t) >= ts24h);
-            this.transaccionesFiltradasRango = filtradas24h.length > 0 ? filtradas24h : this.transacciones.slice(0, 15);
         }
 
         const inventarioBs = this.modelo.bs(datos.valorInventarioUsd);
@@ -311,10 +305,6 @@ export class PanelDuenoView {
                     <button class="w-12 sm:w-14 h-8 flex items-center justify-center font-heading font-bold text-xs rounded text-brand-black hover:bg-gray-100 transition-colors shrink-0" data-rango="1a">1A</button>
                     <button class="w-12 sm:w-14 h-8 flex items-center justify-center font-heading font-bold text-xs rounded text-brand-black hover:bg-gray-100 transition-colors shrink-0" data-rango="todo">TODO</button>
                 </div>
-                <button id="btn-exportar-pdf" class="bg-brand-black text-white border-2 border-brand-black rounded px-3 py-1.5 font-heading font-black text-xs shadow-brutal-sm hover:-translate-y-0.5 transition-all shrink-0 flex items-center gap-1.5">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                    EXPORTAR RESUMEN (PDF)
-                </button>
             </div>
         </div>
 
@@ -637,7 +627,7 @@ export class PanelDuenoView {
                         ${this.respaldos.map((b) => `
                             <div class="border border-brand-black rounded p-2.5 bg-gray-50 flex justify-between items-center text-xs">
                                 <div class="min-w-0 pr-2">
-                                    <p class="font-mono font-black text-brand-black truncate text-[11px]">Respaldos/${b.archivoNombre || `${b.id}.datio`}</p>
+                                    <p class="font-mono font-black text-brand-black truncate text-[11px]">Respaldos/${b.archivoNombre || `${b.id}.backup`}</p>
                                     <p class="text-[10px] text-gray-500 font-mono truncate max-w-[260px]" title="${b.checksumSha256}">SHA: ${b.checksumSha256.slice(0, 16)}... · ${b.fecha}</p>
                                 </div>
                                 <div class="text-right shrink-0">
@@ -649,7 +639,7 @@ export class PanelDuenoView {
                     </div>
                 </div>
                 <div class="mt-4 pt-3 border-t border-gray-200 flex justify-between items-center text-xs text-gray-500 font-bold">
-                    <span class="truncate">Ruta local: <code class="text-[10px] font-mono font-bold bg-gray-100 px-1 rounded">Respaldos/NOMBRE-FECHA-HORA.datio</code></span>
+                    <span class="truncate">Ruta local: <code class="text-[10px] font-mono font-bold bg-gray-100 px-1 rounded">Respaldos/datio_FECHA.backup</code></span>
                     <span class="text-brand-purple font-black shrink-0">Cero alteración</span>
                 </div>
             </div>
@@ -790,10 +780,6 @@ export class PanelDuenoView {
             await this.render();
         });
 
-        document.getElementById('btn-exportar-pdf')?.addEventListener('click', () => {
-            this.exportarResumenPdf(this.vm.panel || datos);
-        });
-
         // Eventos y renderizado de Jornada Laboral y Operadores
         const refrescarModuloJornada = async () => {
             const j = await api.obtenerJornadaActual();
@@ -835,17 +821,30 @@ export class PanelDuenoView {
                     `;
                 }
                 boxAcciones.querySelector('#btn-abrir-jornada')?.addEventListener('click', async () => {
-                    const ops = (await api.listarOperadores()).filter(o => o.activo);
-                    const primerOp = ops[0]?.nombre || 'Cajero Principal';
-                    await api.abrirJornada(primerOp, ops.map(o => o.nombre));
-                    void refrescarModuloJornada();
+                    try {
+                        const ops = (await api.listarOperadores()).filter(o => o.activo);
+                        if (ops.length === 0) {
+                            this.mostrarToast('No hay operadores activos. Registre uno primero.', 'error');
+                            return;
+                        }
+                        const primerOp = ops[0]?.nombre || 'Cajero Principal';
+                        await api.abrirJornada(primerOp, ops.map(o => o.nombre));
+                        this.mostrarToast('Jornada abierta exitosamente.', 'success');
+                        void refrescarModuloJornada();
+                    } catch (e) {
+                        this.mostrarToast('Error al abrir jornada: ' + (e instanceof Error ? e.message : String(e)), 'error');
+                    }
                 });
                 boxAcciones.querySelector('#btn-cerrar-jornada')?.addEventListener('click', async () => {
-                    const confirmacion = window.confirm('¿Confirmas el cierre de la jornada operativa actual? Se generará el balance consolidado del turno.');
-                    if (confirmacion) {
-                        const cerrada = await api.cerrarJornada();
-                        this.mostrarToast(`Jornada cerrada con éxito. ID: ${cerrada.id} — $${cerrada.ventasTotalUsd} USD (Bs. ${cerrada.ventasTotalBs})`, 'success');
-                        void refrescarModuloJornada();
+                    try {
+                        const confirmacion = window.confirm('¿Confirmas el cierre de la jornada operativa actual? Se generará el balance consolidado del turno.');
+                        if (confirmacion) {
+                            const cerrada = await api.cerrarJornada();
+                            this.mostrarToast(`Jornada cerrada. ID: ${cerrada.id} — $${cerrada.ventasTotalUsd} USD (Bs. ${cerrada.ventasTotalBs})`, 'success');
+                            void refrescarModuloJornada();
+                        }
+                    } catch (e) {
+                        this.mostrarToast('Error al cerrar jornada: ' + (e instanceof Error ? e.message : String(e)), 'error');
                     }
                 });
             }
@@ -867,7 +866,7 @@ export class PanelDuenoView {
                     btn.addEventListener('click', async () => {
                         const id = btn.dataset.opEdit || '';
                         const actual = btn.dataset.opNom || '';
-                        const nuevo = window.prompt('Editar nombre del operador:', actual);
+                        const nuevo = prompt('Editar nombre del operador:', actual);
                         if (nuevo && nuevo.trim() && nuevo.trim() !== actual) {
                             await api.editarOperador(id, nuevo.trim());
                             void refrescarModuloJornada();
@@ -879,7 +878,7 @@ export class PanelDuenoView {
                     btn.addEventListener('click', async () => {
                         const id = btn.dataset.opDel || '';
                         const nom = btn.dataset.opNom || '';
-                        const confirma = window.confirm(`¿Seguro que deseas eliminar al operador "${nom}" del sistema?`);
+                        const confirma = confirm(`¿Eliminar al operador "${nom}"?`);
                         if (confirma) {
                             await api.eliminarOperador(id);
                             void refrescarModuloJornada();
@@ -921,7 +920,7 @@ export class PanelDuenoView {
 
         void refrescarModuloJornada();
 
-        // Asignar operadores múltiples al turno
+        // Asignar operadores múltiples al turno (con modal en vez de window.prompt)
         document.getElementById('btn-relevar-operador')?.addEventListener('click', async () => {
             const ops = (await api.listarOperadores()).filter(o => o.activo);
             if (ops.length === 0) {
@@ -929,24 +928,55 @@ export class PanelDuenoView {
                 return;
             }
             const j = await api.obtenerJornadaActual();
-            const actuales = j?.operadoresActivos || [j?.operadorActual || ops[0]?.nombre || ''];
-            const nombres = ops.map(o => o.nombre).join(', ');
-            const elegidosPrompt = window.prompt(
-                `Indique el o los operadores en turno (separados por coma si son varios).\nDisponibles: ${nombres}`,
-                actuales.join(', ')
-            );
-            if (elegidosPrompt !== null) {
-                const seleccionados = elegidosPrompt
-                    .split(',')
-                    .map(s => s.trim())
-                    .filter(s => ops.some(o => o.nombre.toLowerCase() === s.toLowerCase()));
-                if (seleccionados.length > 0) {
-                    await api.asignarOperadoresTurno(seleccionados);
-                    void refrescarModuloJornada();
-                } else if (elegidosPrompt.trim()) {
-                    this.mostrarToast('Ninguno de los nombres coincide con operadores registrados.', 'error');
+            const actuales = j?.operadoresActivos || [j?.operadorActual || ''];
+
+            const modalRoot = document.getElementById('modal-root') || document.body;
+            const modalDiv = document.createElement('div');
+            modalDiv.id = 'modal-asignar-operadores';
+            modalDiv.innerHTML = `
+                <div class="fixed inset-0 bg-black/40 flex items-center justify-center z-[100] p-4">
+                    <div class="bg-white border-2 border-brand-black rounded-lg shadow-brutal p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+                        <div class="flex justify-between items-center border-b-2 border-brand-black pb-2 mb-3">
+                            <h3 class="font-heading font-black text-xl">ASIGNAR OPERADORES AL TURNO</h3>
+                            <button id="modal-asig-close" class="w-8 h-8 rounded border-2 border-brand-black font-black flex items-center justify-center hover:bg-gray-100">&times;</button>
+                        </div>
+                        <p class="text-xs text-gray-600 font-bold mb-3">Selecciona los operadores que atenderán en este turno:</p>
+                        <div class="space-y-2 max-h-56 overflow-y-auto pr-1 mb-4">
+                            ${ops.map(op => {
+                                const seleccionado = actuales.some(a => a.toLowerCase() === op.nombre.toLowerCase());
+                                return `
+                                <label class="flex items-center gap-2.5 p-2.5 rounded border-2 border-brand-black cursor-pointer ${seleccionado ? 'bg-purple-50 border-brand-purple' : 'bg-gray-50'}">
+                                    <input type="checkbox" data-asig-chk="${op.nombre}" ${seleccionado ? 'checked' : ''} class="w-4 h-4 rounded text-brand-purple" />
+                                    <div>
+                                        <span class="font-heading font-black text-sm text-brand-black">${op.nombre}</span>
+                                        <span class="text-[10px] text-gray-500 font-bold ml-2">${op.activo ? 'Activo' : 'Inactivo'}</span>
+                                    </div>
+                                </label>`;
+                            }).join('')}
+                        </div>
+                        <div class="grid grid-cols-2 gap-3 border-t-2 border-brand-black pt-3">
+                            <button id="modal-asig-cancelar" class="bg-white border-2 border-brand-black font-heading font-black py-2.5 rounded text-xs">CANCELAR</button>
+                            <button id="modal-asig-guardar" class="bg-brand-purple text-white font-heading font-black py-2.5 rounded border-2 border-brand-black shadow-brutal-sm text-xs">ASIGNAR A TURNO</button>
+                        </div>
+                    </div>
+                </div>`;
+            modalRoot.appendChild(modalDiv);
+
+            const cerrarModal = () => modalDiv.remove();
+            modalDiv.querySelector('#modal-asig-close')?.addEventListener('click', cerrarModal);
+            modalDiv.querySelector('#modal-asig-cancelar')?.addEventListener('click', cerrarModal);
+            modalDiv.querySelector('#modal-asig-guardar')?.addEventListener('click', async () => {
+                const checked = modalDiv.querySelectorAll<HTMLInputElement>('input[data-asig-chk]:checked');
+                const nombres: string[] = [];
+                checked.forEach(cb => { if (cb.dataset.asigChk) nombres.push(cb.dataset.asigChk); });
+                if (nombres.length === 0) {
+                    this.mostrarToast('Selecciona al menos un operador para el turno.', 'error');
+                    return;
                 }
-            }
+                await api.asignarOperadoresTurno(nombres);
+                cerrarModal();
+                void refrescarModuloJornada();
+            });
         });
 
         // Crear método de pago desde Panel
@@ -1159,9 +1189,7 @@ export class PanelDuenoView {
         });
         const dateDesde = valDesde ? new Date(unixDesde * 1000) : new Date(2020, 0, 1);
         const dateHasta = valHasta ? new Date(unixHasta * 1000) : new Date();
-        this.rangoDescripcion = 'Diagnóstico Personalizado';
         this.rangoDetalleFechas = `Del ${fmtFH(dateDesde)} al ${fmtFH(dateHasta)}`;
-        this.transaccionesFiltradasRango = filtradas;
 
         if (labelEstado) {
             const desdeTexto = valDesde || 'Inicio';
@@ -1179,18 +1207,15 @@ export class PanelDuenoView {
         });
 
         let ms = 86400000;
-        let desc = 'Últimas 24 Horas';
-        if (rango === '7d') { ms = 7 * 86400000; desc = 'Últimos 7 Días'; }
-        else if (rango === '30d') { ms = 30 * 86400000; desc = 'Últimos 30 Días'; }
-        else if (rango === '1a') { ms = 365 * 86400000; desc = 'Último Año (1A)'; }
-        else if (rango === 'todo') { ms = 5 * 365 * 86400000; desc = 'Histórico Consolidado (TODO)'; }
+        if (rango === '7d') { ms = 7 * 86400000; }
+        else if (rango === '30d') { ms = 30 * 86400000; }
+        else if (rango === '1a') { ms = 365 * 86400000; }
+        else if (rango === 'todo') { ms = 5 * 365 * 86400000; }
 
         const desdeDate = new Date(ahora.getTime() - ms);
-        this.rangoDescripcion = desc;
         this.rangoDetalleFechas = `Del ${fmtFH(desdeDate)} al ${fmtFH(ahora)}`;
         const tsDesde = Math.floor(desdeDate.getTime() / 1000);
         const filtradasRango = this.transacciones.filter((t) => this.obtenerTimestampTicket(t) >= tsDesde);
-        this.transaccionesFiltradasRango = filtradasRango.length > 0 ? filtradasRango : this.transacciones.slice(0, 15);
 
         // Calculate totals from filtered transactions instead of multiplying 24h values
         const tasaActual = this.modelo.tasaActual || 807.39;
@@ -1376,369 +1401,6 @@ export class PanelDuenoView {
                 </table>
             </div>
         </div>`;
-    }
-
-    private exportarResumenPdf(datos: PanelDatos): void {
-        const nombreNegocio = this.modelo.getConfig()?.nombre || 'DatioLabs Enterprise';
-        const fechaHora = new Date().toLocaleString('es-VE', {
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-        });
-        const tasaActual = this.modelo.tasaActual || 807.39;
-        const ganBruta = datos.gananciaBrutaUsd || Number(datos.ventas24hUsd) * this.margenBrutoPct / 100;
-        const ganNeta = datos.gananciaNetaUsd || Number(datos.ventas24hUsd) * this.margenNetoPct / 100;
-        const ganNetaBs = Number(datos.ventas24hUsd) * this.margenNetoPct / 100 * tasaActual;
-        const ticketProm = datos.tickets24h > 0 ? (Number(datos.ventas24hUsd) / datos.tickets24h).toFixed(2) : '0.00';
-
-        const categoriasDinero = (datos.dineroPorCategoria && datos.dineroPorCategoria.length > 0)
-            ? datos.dineroPorCategoria
-            : this.calcularDineroPorCategoria();
-        const totalProductosCat = categoriasDinero.reduce((acc, c) => acc + c.cantidadProductos, 0);
-        const totalUnidadesStock = categoriasDinero.reduce((acc, c) => acc + c.unidadesStock, 0);
-        const totalBrutoUsd = categoriasDinero.reduce((acc, c) => acc + parseNum(c.dineroBrutoUsd), 0);
-        const totalBrutoBs = categoriasDinero.reduce((acc, c) => acc + parseNum(c.dineroBrutoBs), 0);
-        const totalVentaUsd = categoriasDinero.reduce((acc, c) => acc + parseNum(c.dineroVentaUsd), 0);
-        const totalMargenUsd = Math.max(0, totalVentaUsd - totalBrutoUsd);
-        const totalMargenPct = totalVentaUsd > 0 ? ((totalMargenUsd / totalVentaUsd) * 100).toFixed(1) : '0.0';
-
-        // Sección: Deudas Abiertas
-        const deudasAbiertas = this.cuentas.filter((c) => c.tipo === 'deuda');
-        let totalConsumoDeudas = 0;
-        let totalAbonosDeudas = 0;
-        let totalSaldoDeudasUsd = 0;
-
-        deudasAbiertas.forEach((d) => {
-            const tot = parseNum(d.totalParcialUsd);
-            const abo = parseNum(d.abonosUsd);
-            const sld = Math.max(0, tot - abo);
-            totalConsumoDeudas += tot;
-            totalAbonosDeudas += abo;
-            totalSaldoDeudasUsd += sld;
-        });
-        const totalSaldoDeudasBs = totalSaldoDeudasUsd * tasaActual;
-
-        const filasPdfDeudas = deudasAbiertas.map((d, idx) => {
-            const tot = parseNum(d.totalParcialUsd);
-            const abo = parseNum(d.abonosUsd);
-            const sld = Math.max(0, tot - abo);
-            const sldBs = sld * tasaActual;
-            const cliente = d.cliente || d.etiqueta;
-            const nota = d.nota || '-';
-            const fecha = d.fechaCreacionStr || 'Registrada';
-            return `
-            <tr style="border-bottom: 1px solid #ddd; ${idx % 2 === 0 ? 'background-color: #fafafa;' : ''}">
-                <td style="padding: 6px 10px; font-family: monospace; font-weight: bold; color: #1E232A;">${d.ventaId}</td>
-                <td style="padding: 6px 10px; font-weight: bold;">${cliente}</td>
-                <td style="padding: 6px 10px; color: #555;">${fecha}</td>
-                <td style="padding: 6px 10px; font-style: italic; color: #444;">${nota}</td>
-                <td style="padding: 6px 10px; text-align: right;">$ ${fmt(tot)}</td>
-                <td style="padding: 6px 10px; text-align: right; color: #15803d; font-weight: bold;">$ ${fmt(abo)}</td>
-                <td style="padding: 6px 10px; text-align: right; font-weight: bold; color: #b45309;">$ ${fmt(sld)}</td>
-                <td style="padding: 6px 10px; text-align: right; font-weight: bold; color: #1E232A;">Bs. ${fmt(sldBs)}</td>
-            </tr>`;
-        }).join('');
-
-        const filasPdfCategorias = categoriasDinero.map((c, idx) => `
-            <tr style="border-bottom: 1px solid #ddd; ${idx % 2 === 0 ? 'background-color: #fafafa;' : ''}">
-                <td style="padding: 6px 10px; font-weight: bold; color: #111;">${c.nombre}</td>
-                <td style="padding: 6px 10px; text-align: center;">${c.cantidadProductos} art.</td>
-                <td style="padding: 6px 10px; text-align: right;">${c.unidadesStock} un.</td>
-                <td style="padding: 6px 10px; text-align: right; font-weight: bold;">$ ${fmt(c.dineroBrutoUsd)}</td>
-                <td style="padding: 6px 10px; text-align: right; font-weight: bold; color: #1E232A;">Bs. ${fmt(c.dineroBrutoBs)}</td>
-                <td style="padding: 6px 10px; text-align: right;">$ ${fmt(c.dineroVentaUsd)}</td>
-                <td style="padding: 6px 10px; text-align: right; color: #15803d; font-weight: bold;">$ ${fmt(c.margenBrutoProyectadoUsd)} (${c.margenBrutoPct}%)</td>
-                <td style="padding: 6px 10px; text-align: right; font-weight: bold;">${c.porcentajeCapital}%</td>
-            </tr>
-        `).join('');
-
-        const filasProductos = datos.topProductos.map((p, idx) => {
-            const precioTotalItemUsd = p.totalUsd ? Number(p.totalUsd) : 0;
-            const precioTotalItemBs = precioTotalItemUsd * tasaActual;
-            return `
-            <tr style="border-bottom: 1px solid #ddd; ${idx % 2 === 0 ? 'background-color: #fafafa;' : ''}">
-                <td style="padding: 7px 10px; font-weight: bold; color: #111;">${p.nombre}</td>
-                <td style="padding: 7px 10px; text-align: right;">${p.cantidad} un.</td>
-                <td style="padding: 7px 10px; text-align: right; font-weight: bold;">$ ${precioTotalItemUsd.toFixed(2)}</td>
-                <td style="padding: 7px 10px; text-align: right; font-weight: bold; color: #1E232A;">Bs. ${precioTotalItemBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                <td style="padding: 7px 10px; text-align: right; color: #555;">${p.porcentaje}%</td>
-            </tr>`;
-        }).join('');
-
-        const transaccionesParaPdf = (this.transaccionesFiltradasRango.length > 0 ? this.transaccionesFiltradasRango : this.transacciones);
-        const filasTransacciones = transaccionesParaPdf.slice(0, 30).map((t, idx) => {
-            const tasaT = t.tasaDelDia ? Number(t.tasaDelDia).toFixed(2) : tasaActual.toFixed(2);
-            let pagoStr = 'PAGO DIRECTO';
-            if (t.pagos && t.pagos.length > 1) {
-                pagoStr = `MIXTO (${t.pagos.length})`;
-            } else if (t.pagos && t.pagos.length === 1) {
-                pagoStr = t.pagos[0].metodo;
-            }
-            return `
-            <tr style="border-bottom: 1px solid #ddd; ${idx % 2 === 0 ? 'background-color: #fafafa;' : ''}">
-                <td style="padding: 6px 10px; font-family: monospace; font-weight: bold; color: #1E232A;">${t.ventaId}</td>
-                <td style="padding: 6px 10px; color: #555;">${t.fechaHora || 'Hoy'}</td>
-                <td style="padding: 6px 10px;"><span style="font-size: 9px; font-weight: 900; background: #eee; padding: 2px 5px; border-radius: 3px; border: 1px solid #ccc;">${t.canal || 'VENTA DIRECTA'}</span></td>
-                <td style="padding: 6px 10px; font-weight: bold; font-size: 10px; color: #222;">${pagoStr}</td>
-                <td style="padding: 6px 10px; text-align: right; font-family: monospace; font-weight: bold;">Bs. ${tasaT}</td>
-                <td style="padding: 6px 10px; text-align: right; font-weight: bold;">$ ${Number(t.totalUsd).toFixed(2)}</td>
-                <td style="padding: 6px 10px; text-align: right; font-weight: bold; color: #1E232A;">Bs. ${Number(t.totalBs).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-            </tr>
-            `;
-        }).join('');
-
-        const htmlContent = `
-        <!DOCTYPE html>
-        <html lang="es">
-        <head>
-            <meta charset="utf-8">
-            <title>Auditoría Ejecutiva de Negocio - ${nombreNegocio}</title>
-            <style>
-                @page { size: letter; margin: 12mm; }
-                body {
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                    color: #111;
-                    line-height: 1.35;
-                    padding: 16px;
-                }
-                .header {
-                    border-bottom: 3px solid #000;
-                    padding-bottom: 12px;
-                    margin-bottom: 16px;
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: flex-start;
-                }
-                .title { font-size: 22px; font-weight: 900; margin: 0; text-transform: uppercase; letter-spacing: -0.5px; }
-                .subtitle { font-size: 12px; color: #444; margin-top: 3px; font-weight: bold; text-transform: uppercase; }
-                .meta { text-align: right; font-size: 10.5px; color: #222; }
-                .kpi-grid {
-                    display: grid;
-                    grid-template-columns: repeat(4, 1fr);
-                    gap: 10px;
-                    margin-bottom: 18px;
-                }
-                .kpi-card {
-                    border: 2px solid #000;
-                    border-radius: 5px;
-                    padding: 10px;
-                    background: #fdfdfd;
-                }
-                .kpi-label { font-size: 9.5px; font-weight: 900; text-transform: uppercase; color: #555; }
-                .kpi-val { font-size: 17px; font-weight: 900; color: #000; margin-top: 3px; }
-                .kpi-sub { font-size: 10px; font-weight: bold; color: #666; margin-top: 2px; }
-                table {
-                    width: 100%;
-                    border-collapse: collapse;
-                    margin-top: 8px;
-                    font-size: 11px;
-                }
-                th {
-                    background: #000;
-                    color: #fff;
-                    font-size: 9.5px;
-                    font-weight: 900;
-                    text-transform: uppercase;
-                    padding: 6px 10px;
-                    text-align: left;
-                }
-                th.right { text-align: right; }
-                .section-title {
-                    font-size: 12.5px;
-                    font-weight: 900;
-                    text-transform: uppercase;
-                    border-bottom: 2px solid #000;
-                    padding-bottom: 3px;
-                    margin-top: 18px;
-                    margin-bottom: 8px;
-                }
-                .footer {
-                    margin-top: 24px;
-                    border-top: 1px solid #ccc;
-                    padding-top: 8px;
-                    font-size: 9.5px;
-                    color: #666;
-                    display: flex;
-                    justify-content: space-between;
-                }
-            </style>
-        </head>
-        <body>
-            <div class="header">
-                <div>
-                    <h1 class="title">${nombreNegocio}</h1>
-                    <div class="subtitle">AUDITORÍA OPERATIVA Y BALANCE FINANCIERO</div>
-                </div>
-                <div class="meta">
-                    <div><strong>EMISIÓN:</strong> ${fechaHora}</div>
-                    <div><strong>PERÍODO AUDITADO:</strong> ${this.rangoDescripcion} (${this.rangoDetalleFechas})</div>
-                    <div><strong>TASA BCV AUDITADA:</strong> Bs. ${tasaActual.toFixed(2)}</div>
-                    <div><strong>ESTADO:</strong> CONSOLIDADO OFICIAL AUDITADO</div>
-                </div>
-            </div>
-
-            <div class="kpi-grid">
-                <div class="kpi-card" style="background: #fffbeb;">
-                    <div class="kpi-label">Ventas Totales ($)</div>
-                    <div class="kpi-val">$ ${Number(datos.ventas24hUsd).toFixed(2)}</div>
-                    <div class="kpi-sub">Bs. ${Number(datos.ventas24hBs).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                </div>
-                <div class="kpi-card" style="background: #ecfdf5;">
-                    <div class="kpi-label">Ganancia Bruta</div>
-                    <div class="kpi-val">$ ${Number(ganBruta).toFixed(2)}</div>
-                    <div class="kpi-sub">Margen comercial ${this.margenBrutoPct.toFixed(1)}%</div>
-                </div>
-                <div class="kpi-card" style="background: #eff6ff;">
-                    <div class="kpi-label">Ganancia Neta</div>
-                    <div class="kpi-val">$ ${Number(ganNeta).toFixed(2)}</div>
-                    <div class="kpi-sub">Bs. ${Number(ganNetaBs).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                </div>
-                <div class="kpi-card" style="background: #faf5ff;">
-                    <div class="kpi-label">Inventario Activo</div>
-                    <div class="kpi-val">$ ${Number(datos.valorInventarioUsd).toFixed(2)}</div>
-                    <div class="kpi-sub">Bs. ${(Number(datos.valorInventarioUsd) * tasaActual).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                </div>
-            </div>
-
-            <div class="section-title">Indicadores Generales y Operativos de Desempeño</div>
-            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px;">
-                <div style="border: 1px solid #ccc; padding: 8px; border-radius: 4px;">
-                    <div style="font-size: 9px; font-weight: bold; color: #666;">TICKETS EMITIDOS</div>
-                    <div style="font-size: 15px; font-weight: 900;">${datos.tickets24h} transacciones</div>
-                </div>
-                <div style="border: 1px solid #ccc; padding: 8px; border-radius: 4px;">
-                    <div style="font-size: 9px; font-weight: bold; color: #666;">TICKET PROMEDIO</div>
-                    <div style="font-size: 15px; font-weight: 900;">$ ${ticketProm} USD</div>
-                </div>
-                <div style="border: 1px solid #ccc; padding: 8px; border-radius: 4px;">
-                    <div style="font-size: 9px; font-weight: bold; color: #666;">DEMANDA PRINCIPAL</div>
-                    <div style="font-size: 15px; font-weight: 900; color: #1d4ed8;">82.4% facturación</div>
-                </div>
-                <div style="border: 1px solid #ccc; padding: 8px; border-radius: 4px;">
-                    <div style="font-size: 9px; font-weight: bold; color: #666;">ALERTAS DE STOCK</div>
-                    <div style="font-size: 15px; font-weight: 900; color: ${datos.criticos.length > 0 ? '#b91c1c' : '#15803d'};">
-                        ${datos.criticos.length} críticos
-                    </div>
-                </div>
-            </div>
-
-            ${deudasAbiertas.length > 0 ? `
-            <div class="section-title">Deudas Abiertas (${deudasAbiertas.length} Registros Pendientes de Cobro)</div>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Identificador</th>
-                        <th>Cliente / Deudor</th>
-                        <th>Fecha Registro</th>
-                        <th>Nota / Plazo de Pago</th>
-                        <th class="right">Consumo ($)</th>
-                        <th class="right">Abonado ($)</th>
-                        <th class="right">Saldo Deuda ($)</th>
-                        <th class="right">Saldo Deuda (Bs.)</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${filasPdfDeudas}
-                </tbody>
-                <tfoot>
-                    <tr style="background-color: #eee; font-weight: 900; border-top: 2px solid #000;">
-                        <td colspan="4" style="padding: 7px 10px;">TOTAL DEUDAS ABIERTAS PENDIENTES</td>
-                        <td style="padding: 7px 10px; text-align: right;">$ ${fmt(totalConsumoDeudas)}</td>
-                        <td style="padding: 7px 10px; text-align: right; color: #15803d;">$ ${fmt(totalAbonosDeudas)}</td>
-                        <td style="padding: 7px 10px; text-align: right; color: #b45309;">$ ${fmt(totalSaldoDeudasUsd)}</td>
-                        <td style="padding: 7px 10px; text-align: right; color: #1E232A;">Bs. ${fmt(totalSaldoDeudasBs)}</td>
-                    </tr>
-                </tfoot>
-            </table>
-            ` : ''}
-
-            <div class="section-title">Distribución de Dinero en Bruto e Inventario por Categoría</div>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Categoría</th>
-                        <th class="right">N° Productos</th>
-                        <th class="right">Stock Físico</th>
-                        <th class="right">Costo Bruto ($)</th>
-                        <th class="right">Costo Bruto (Bs.)</th>
-                        <th class="right">Valor PVP ($)</th>
-                        <th class="right">Margen Bruto</th>
-                        <th class="right">% Capital</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${filasPdfCategorias}
-                </tbody>
-                <tfoot>
-                    <tr style="background-color: #eee; font-weight: 900; border-top: 2px solid #000;">
-                        <td style="padding: 7px 10px;">TOTAL CONSOLIDADO</td>
-                        <td style="padding: 7px 10px; text-align: right;">${totalProductosCat} prods.</td>
-                        <td style="padding: 7px 10px; text-align: right;">${totalUnidadesStock} un.</td>
-                        <td style="padding: 7px 10px; text-align: right;">$ ${fmt(totalBrutoUsd)}</td>
-                        <td style="padding: 7px 10px; text-align: right; color: #1E232A;">Bs. ${fmt(totalBrutoBs)}</td>
-                        <td style="padding: 7px 10px; text-align: right;">$ ${fmt(totalVentaUsd)}</td>
-                        <td style="padding: 7px 10px; text-align: right; color: #15803d;">$ ${fmt(totalMargenUsd)} (${totalMargenPct}%)</td>
-                        <td style="padding: 7px 10px; text-align: right;">100.0%</td>
-                    </tr>
-                </tfoot>
-            </table>
-
-            <div class="section-title">Productos Comercializados en el Período (${datos.topProductos.length} Artículos)</div>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Producto / Denominación Comercial</th>
-                        <th class="right">Unidades</th>
-                        <th class="right">Total USD</th>
-                        <th class="right">Total Bolívares (Bs.)</th>
-                        <th class="right">Part. (%)</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${filasProductos || '<tr><td colspan="5" style="text-align: center; padding: 10px;">Sin registros en el período.</td></tr>'}
-                </tbody>
-            </table>
-
-            <div class="section-title">Auditoría de Comprobantes de Venta (${transaccionesParaPdf.length} Tickets en el Período)</div>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Identificador</th>
-                        <th>Fecha y Hora</th>
-                        <th>Canal</th>
-                        <th>Método de Pago</th>
-                        <th class="right">Tasa BCV Aplicada</th>
-                        <th class="right">Total USD</th>
-                        <th class="right">Total Bs.</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${filasTransacciones || '<tr><td colspan="7" style="text-align: center; padding: 10px;">Sin transacciones registradas.</td></tr>'}
-                </tbody>
-            </table>
-
-            <div class="footer">
-                <div>DatioLabs Enterprise Data Product · Integridad Transaccional Local-First Sled + SHA-256</div>
-                <div>Documento descargable e imprimible en formato PDF</div>
-            </div>
-        </body>
-        </html>
-        `;
-
-        // Create blob and trigger download instead of using window.open()
-        const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `Auditoria_${nombreNegocio.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.html`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        this.mostrarToast('Documento HTML descargado. Puedes abrirlo y guardarlo como PDF desde tu navegador.', 'success');
     }
 
     private mostrarToast(mensaje: string, tipo: 'success' | 'error' | 'info' = 'info'): void {

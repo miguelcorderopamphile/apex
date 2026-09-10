@@ -3,6 +3,9 @@ import { BcvWidget } from './tasa/BcvWidget';
 import { api, ConfigInfo, RUBRO_ABASTO, RUBRO_LICORERIA, RUBRO_PANADERIA } from './negocio/api';
 import { NegocioModel } from './negocio/NegocioModel';
 import { WizardView } from './negocio/WizardView';
+
+// Debe coincidir con SERVIDOR_PORT en lib.rs
+const SERVER_PORT = 4000;
 import { CajaViewModel } from './negocio/CajaViewModel';
 import { CajaView } from './negocio/CajaView';
 import { PanelDuenoView, PanelViewModel } from './negocio/PanelDuenoView';
@@ -33,6 +36,10 @@ class AppController {
     private wsSignaling: WebSocket | null = null;
     private offerResendTimer: ReturnType<typeof setInterval> | null = null;
     private p2pPin: string = '';
+    private signalingRetries = 0;
+    private p2pConnected = false;
+    private roomId = '';
+    private reconectando = false;
 
     private readonly STUN_SERVERS: RTCConfiguration = {
         iceServers: [
@@ -50,6 +57,13 @@ class AppController {
         this.root = root;
         this.modalRoot = this.crearModalRoot();
         this.widget.iniciar();
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const roomParam = urlParams.get('room');
+        if (roomParam) {
+            await this.arrancarMovil(root, roomParam);
+            return;
+        }
 
         window.addEventListener('tasa_actualizada', (e: Event) => {
             const custom = e as CustomEvent<number>;
@@ -79,6 +93,144 @@ class AppController {
         await this.arrancarCaja();
     }
 
+    private async arrancarMovil(root: HTMLElement, roomId: string): Promise<void> {
+        root.innerHTML = `
+        <div class="flex flex-col items-center justify-center h-screen bg-gray-50">
+            <div class="text-center">
+                <div class="w-12 h-12 border-4 border-brand-black border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                <h2 class="font-heading font-black text-xl">CONECTANDO...</h2>
+                <p class="text-sm text-gray-500 mt-2">Estableciendo conexion P2P con el equipo principal</p>
+                <p id="movil-status" class="text-xs text-gray-400 mt-1">Conectando al servidor de senalizacion...</p>
+            </div>
+        </div>`;
+
+        const pin = new URLSearchParams(window.location.search).get('pin') || '';
+        const signalingBase = (window as any).__SIGNALING_URL__
+            || 'wss://datiolabs-signaling.apex-importvcb.workers.dev';
+        const wsUrl = `${signalingBase}/ws/signaling?room=${roomId}&pin=${encodeURIComponent(pin || 'default')}`;
+
+        try {
+            const ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                const s = document.getElementById('movil-status');
+                if (s) s.textContent = 'Senalizacion conectada. Esperando offer P2P...';
+            };
+
+            ws.onmessage = async (event) => {
+                const msg = JSON.parse(event.data);
+                if (msg.type === 'offer') {
+                    const s = document.getElementById('movil-status');
+                    if (s) s.textContent = 'Offer recibido. Estableciendo conexion...';
+
+                    const pc = new RTCPeerConnection(this.STUN_SERVERS);
+
+                    pc.onicecandidate = (e) => {
+                        if (e.candidate && ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'ice-candidate', candidate: e.candidate }));
+                        }
+                    };
+
+                    const dc = pc.createDataChannel('api', { ordered: true });
+
+                    dc.onopen = () => {
+                        (window as any).__DATACHANNEL__ = dc;
+                        (window as any).__DATACHANNEL_WS__ = ws;
+                        const ss = document.getElementById('movil-status');
+                        if (ss) ss.textContent = 'Conexion P2P lista!';
+                        try {
+                            this.root.innerHTML = `
+                            <div class="flex flex-col items-center justify-center h-screen bg-gray-50">
+                                <div class="text-center">
+                                    <div class="w-12 h-12 border-4 border-green-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                                    <h2 class="font-heading font-black text-xl text-green-700">CONECTADO</h2>
+                                    <p class="text-sm text-gray-500 mt-2">Cargando datos del negocio...</p>
+                                </div>
+                            </div>`;
+                            void this.cargarConfigMovil();
+                        } catch (_) {}
+                    };
+
+                    dc.onclose = () => {
+                        delete (window as any).__DATACHANNEL__;
+                        this.root.innerHTML = `
+                        <div class="flex flex-col items-center justify-center h-screen bg-gray-50">
+                            <div class="text-center">
+                                <div class="w-12 h-12 border-4 border-red-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+                                <h2 class="font-heading font-black text-xl text-red-700">DESCONECTADO</h2>
+                                <p class="text-sm text-gray-500 mt-2">La conexion P2P se ha perdido. Recargue la pagina.</p>
+                                <button onclick="location.reload()" class="mt-4 bg-brand-black text-white px-4 py-2 rounded font-heading font-black text-sm">RECONECTAR</button>
+                            </div>
+                        </div>`;
+                    };
+
+                    dc.onmessage = (e) => {
+                        try {
+                            const resp = JSON.parse(e.data);
+                            if (resp.type === 'ping') {
+                                try { dc.send(JSON.stringify({ type: 'pong', ts: resp.ts })); } catch (_) {}
+                                return;
+                            }
+                            const pending = (window as any).__P2P_PENDING__;
+                            if (pending && resp.id && pending.has(resp.id)) {
+                                const p = pending.get(resp.id);
+                                pending.delete(resp.id);
+                                if (resp.error) { p.reject(new Error(resp.error)); }
+                                else { p.resolve(resp.body); }
+                            }
+                        } catch (_) {}
+                    };
+
+                    await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
+
+                    if (ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'answer', sdp: pc.localDescription }));
+                    }
+                } else if (msg.type === 'error') {
+                    this.root.innerHTML = `
+                    <div class="flex flex-col items-center justify-center h-screen bg-gray-50">
+                        <div class="text-center">
+                            <h2 class="font-heading font-black text-xl text-red-700">ERROR</h2>
+                            <p class="text-sm text-gray-500 mt-2">${msg.message || 'Error de conexion'}</p>
+                        </div>
+                    </div>`;
+                }
+            };
+
+            ws.onerror = () => {
+                const s = document.getElementById('movil-status');
+                if (s) s.textContent = 'Error de conexion con el servidor de senalizacion';
+            };
+
+            ws.onclose = () => {
+                if (!(window as any).__DATACHANNEL__) {
+                    const s = document.getElementById('movil-status');
+                    if (s) s.textContent = 'Conexion perdida. Reconectando...';
+                    setTimeout(() => this.arrancarMovil(root, roomId), 3000);
+                }
+            };
+        } catch (e) {
+            root.innerHTML = `
+            <div class="flex flex-col items-center justify-center h-screen bg-gray-50">
+                <div class="text-center">
+                    <h2 class="font-heading font-black text-xl text-red-700">ERROR</h2>
+                    <p class="text-sm text-gray-500 mt-2">No se pudo conectar al servidor de senalizacion</p>
+                </div>
+            </div>`;
+        }
+    }
+
+    private async cargarConfigMovil(): Promise<void> {
+        try {
+            await this.modelo.cargarConfig();
+        } catch (_) {}
+        this.pintarBotonesRol(this.modelo.getConfig()!);
+        document.getElementById('btn-conectar-movil')?.remove();
+        await this.arrancarCaja();
+    }
+
     private crearModalRoot(): HTMLElement {
         let el = document.getElementById('modal-root');
         if (!el) {
@@ -101,9 +253,14 @@ class AppController {
     private async ejecutarBackupAutomatico(): Promise<void> {
         try {
             const dir = await api.getBackupDir();
-            if (dir) await api.autoBackup(dir, 5);
-        } catch (_) {
-            /* backup automatico no bloquea el arranque */
+            if (dir) {
+                const result = await api.autoBackup(dir, 5);
+                if (result) {
+                    console.log(`[Backup] Auto-backup generado: ${result.totalRegistros} registros`);
+                }
+            }
+        } catch (e) {
+            console.warn('[Backup] Auto-backup falló:', e);
         }
     }
 
@@ -251,7 +408,7 @@ class AppController {
                     <button id="pin-inv-cancelar" class="bg-white border-2 border-brand-black font-heading font-black py-3 rounded">CANCELAR</button>
                     <button id="pin-inv-ok" class="bg-brand-black text-white font-heading font-black py-3 rounded">ENTRAR</button>
                 </div>
-                <button id="pin-inv-sin-clave" class="w-full bg-gray-100 border-2 border-brand-black font-heading font-black py-2 rounded text-xs">VER SIN CLAVE (solo stock)</button>
+                <button id="pin-inv-sin-clave" class="w-full bg-gray-100 border-2 border-brand-black font-heading font-black py-2 rounded text-xs">VER CATÁLOGO (sin precios ni stock)</button>
             </div>
         </div>`;
         const cerrar = (): void => { this.modalRoot.innerHTML = ''; };
@@ -363,7 +520,7 @@ class AppController {
             qrData = null;
         }
 
-        const url = qrData?.url || 'http://127.0.0.1:4000/panel';
+        const url = qrData?.url || `http://127.0.0.1:${SERVER_PORT}/panel`;
         const qrBase64 = qrData?.qrBase64 || '';
         const roomId = qrData?.roomId || '';
 
@@ -443,17 +600,23 @@ class AppController {
     }
 
     private conectarSignaling(roomId: string, pin: string = ''): void {
+        this.roomId = roomId;
         this.p2pPin = pin;
         const pinParam = pin ? `&pin=${encodeURIComponent(pin)}` : '&pin=default';
         const signalingBase = (window as any).__SIGNALING_URL__
-            || 'wss://datiolabs-signaling.<tu-subdominio>.workers.dev';
+            || 'wss://datiolabs-signaling.apex-importvcb.workers.dev';
         const wsUrl = `${signalingBase}/ws/signaling?room=${roomId}${pinParam}`;
 
         try {
             this.wsSignaling = new WebSocket(wsUrl);
             this.wsSignaling.onopen = () => {
-                this.actualizarEstadoP2P('connected', 'Conectado al servidor de senalizacion. Creando conexion P2P...');
-                this.crearPeerConnection(roomId);
+                this.signalingRetries = 0;
+                if (this.dataChannel?.readyState === 'open' && this.peerConnection?.connectionState === 'connected') {
+                    this.actualizarEstadoP2P('connected', 'Senalizacion reconectada - P2P activo');
+                } else {
+                    this.actualizarEstadoP2P('connected', 'Conectado al servidor de senalizacion...');
+                    this.crearPeerConnection(roomId);
+                }
             };
             this.wsSignaling.onmessage = async (event) => {
                 const msg = JSON.parse(event.data);
@@ -467,25 +630,39 @@ class AppController {
                     } catch (e) {
                         console.warn('[P2P] ICE candidate error:', e);
                     }
+                } else if (msg.type === 'error') {
+                    this.actualizarEstadoP2P('error', msg.message || 'Error del servidor de senalizacion');
                 }
             };
             this.wsSignaling.onclose = () => {
-                this.actualizarEstadoP2P('disconnected', 'Desconectado del servidor de senalizacion. Reconectando...');
+                if (this.dataChannel?.readyState === 'open') {
+                    this.actualizarEstadoP2P('connected', 'Senalizacion caida - P2P sigue activo');
+                } else {
+                    this.actualizarEstadoP2P('disconnected', 'Senalizacion desconectada. Reconectando...');
+                }
+                const delay = Math.min(1000 * Math.pow(2, this.signalingRetries), 30000);
+                this.signalingRetries++;
                 setTimeout(() => {
-                    if (this.wsSignaling && this.wsSignaling.readyState === WebSocket.CLOSED) {
-                        this.conectarSignaling(roomId, this.p2pPin);
-                    }
-                }, 3000);
+                    this.conectarSignaling(roomId, this.p2pPin);
+                }, delay);
             };
-            this.wsSignaling.onerror = () => {
-                this.actualizarEstadoP2P('error', 'Error de conexion al servidor de senalizacion');
-            };
+            this.wsSignaling.onerror = () => {};
         } catch (e) {
             this.actualizarEstadoP2P('error', 'Error al conectar con el servidor');
+            const delay = Math.min(1000 * Math.pow(2, this.signalingRetries), 30000);
+            this.signalingRetries++;
+            setTimeout(() => {
+                this.conectarSignaling(roomId, this.p2pPin);
+            }, delay);
         }
     }
 
     private async crearPeerConnection(_roomId: string): Promise<void> {
+        if (this.reconectando) return;
+
+        if (this.peerConnection) { try { this.peerConnection.close(); } catch (_) {} this.peerConnection = null; }
+        if (this.dataChannel) { this.dataChannel = null; }
+
         this.peerConnection = new RTCPeerConnection(this.STUN_SERVERS);
 
         this.peerConnection.onicecandidate = (event) => {
@@ -500,19 +677,69 @@ class AppController {
         this.peerConnection.onconnectionstatechange = () => {
             const state = this.peerConnection?.connectionState;
             if (state === 'connected') {
+                this.p2pConnected = true;
                 this.actualizarEstadoP2P('connected', 'P2P Conectado - Dispositivo movil vinculado');
-            } else if (state === 'disconnected' || state === 'failed') {
-                this.actualizarEstadoP2P('disconnected', 'Conexion P2P perdida');
+            } else if (state === 'disconnected') {
+                this.actualizarEstadoP2P('connecting', 'Conexion P2P inestable, intentando recuperar...');
+                setTimeout(() => {
+                    if (this.peerConnection?.connectionState === 'disconnected' && this.peerConnection?.iceConnectionState !== 'failed') {
+                        this.intentarIceRestart();
+                    }
+                }, 5000);
+            } else if (state === 'failed') {
+                this.p2pConnected = false;
+                this.actualizarEstadoP2P('disconnected', 'Conexion P2P perdida. Reconectando...');
+                this.reconectarP2P();
+            }
+        };
+
+        this.peerConnection.oniceconnectionstatechange = () => {
+            const iceState = this.peerConnection?.iceConnectionState;
+            if (iceState === 'failed') {
+                this.p2pConnected = false;
+                this.reconectarP2P();
             }
         };
 
         this.dataChannel = this.peerConnection.createDataChannel('api', { ordered: true });
-        this.dataChannel.onopen = () => {
+        this.dataChannel.onopen = async () => {
             if (this.offerResendTimer) { clearInterval(this.offerResendTimer); this.offerResendTimer = null; }
-            this.actualizarEstadoP2P('connected', 'DataChannel abierto - Listo para recibir solicitudes');
+            this.p2pConnected = true;
+            (window as any).__DATACHANNEL__ = this.dataChannel;
+            this.actualizarEstadoP2P('connected', 'DataChannel abierto - Autenticando...');
+            try {
+                const pin = this.p2pPin || '';
+                if (pin) {
+                    const loginRes = await fetch(`http://localhost:${SERVER_PORT}/api/auth/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ pin }),
+                    });
+                    if (loginRes.ok) {
+                        const setCookie = loginRes.headers.get('set-cookie');
+                        if (setCookie) {
+                            const match = setCookie.match(/datiolabs_session=[a-zA-Z0-9]{32}/);
+                            if (match) this.p2pSessionCookie = match[0];
+                        }
+                    }
+                }
+                this.actualizarEstadoP2P('connected', 'DataChannel listo - Dispositivo movil vinculado');
+                this.iniciarKeepalive();
+            } catch (_) {
+                this.actualizarEstadoP2P('connected', 'DataChannel abierto - Dispositivo movil vinculado');
+                this.iniciarKeepalive();
+            }
         };
         this.dataChannel.onclose = () => {
+            this.p2pConnected = false;
+            this.detenerKeepalive();
+            delete (window as any).__DATACHANNEL__;
             this.actualizarEstadoP2P('disconnected', 'DataChannel cerrado');
+            setTimeout(() => {
+                if (!this.p2pConnected && this.peerConnection && this.peerConnection.connectionState !== 'closed' && this.peerConnection.connectionState !== 'failed') {
+                    this.reconectarP2P();
+                }
+            }, 2000);
         };
         this.dataChannel.onmessage = (event) => {
             this.handleDataChannelMessage(event.data);
@@ -531,7 +758,7 @@ class AppController {
 
         if (this.offerResendTimer) clearInterval(this.offerResendTimer);
         let offerAttempts = 0;
-        const MAX_OFFER_ATTEMPTS = 30;
+        const MAX_OFFER_ATTEMPTS = 60;
         this.offerResendTimer = setInterval(() => {
             offerAttempts++;
             if (offerAttempts >= MAX_OFFER_ATTEMPTS) {
@@ -546,21 +773,95 @@ class AppController {
                     sdp: this.peerConnection.localDescription,
                 }));
             }
-        }, 3000);
+        }, 5000);
     }
+
+    private p2pSessionCookie: string = '';
 
     private async handleDataChannelMessage(data: string): Promise<void> {
         try {
             const msg = JSON.parse(data);
-            const { id, method, path, body } = msg;
+
+            if (msg.type === 'ping') {
+                if (this.dataChannel?.readyState === 'open') {
+                    try { this.dataChannel.send(JSON.stringify({ type: 'pong', ts: msg.ts })); } catch (_) {}
+                }
+                return;
+            }
+            if (msg.type === 'pong') {
+                this.keepalivePending = false;
+                return;
+            }
+
+            const { id, method, path, body, comando, args: cmdArgs } = msg;
+
+            let httpMethod = method || 'GET';
+            let httpPath = path;
+            let httpBody = body;
+
+            if (comando && !httpPath) {
+                const cmdRoutes: Record<string, { method: string; path: string | ((a: any) => string) }> = {
+                    'obtener_config':            { method: 'GET',  path: '/api/config' },
+                    'listar_productos':          { method: 'GET',  path: '/api/productos' },
+                    'listar_categorias':         { method: 'GET',  path: '/api/categorias' },
+                    'panel':                     { method: 'GET',  path: '/api/panel' },
+                    'listar_ventas':             { method: 'GET',  path: '/api/ventas' },
+                    'listar_cuentas':            { method: 'GET',  path: '/api/cuentas' },
+                    'obtener_jornada_actual':    { method: 'GET',  path: '/api/jornadas/actual' },
+                    'listar_historico_jornadas': { method: 'GET',  path: '/api/jornadas' },
+                    'listar_dispositivos':       { method: 'GET',  path: '/api/dispositivos' },
+                    'listar_metodos_pago':       { method: 'GET',  path: '/api/metodos-pago' },
+                    'listar_operadores':         { method: 'GET',  path: '/api/operadores' },
+                    'obtener_semaforo_stock':    { method: 'GET',  path: '/api/semaforo' },
+                    'listar_historico_tasas':    { method: 'GET',  path: '/api/historico-tasas' },
+                    'obtener_tasa_bcv':          { method: 'GET',  path: '/api/tasa' },
+                    'listar_respaldos':          { method: 'GET',  path: '/api/respaldos' },
+                    'obtener_spa':               { method: 'GET',  path: '/api/spa' },
+                    'registrar_venta':           { method: 'POST', path: '/api/ventas' },
+                    'agregar_consumo':           { method: 'POST', path: (a: any) => `/api/cuentas/${a?.ventaId || a?.cuentaId || ''}/consumo` },
+                    'abrir_cuenta':              { method: 'POST', path: '/api/cuentas' },
+                    'abrir_jornada':             { method: 'POST', path: '/api/jornadas/abrir' },
+                    'cerrar_jornada':            { method: 'POST', path: '/api/jornadas/cerrar' },
+                    'crear_producto':            { method: 'POST', path: '/api/productos' },
+                    'editar_producto':           { method: 'PUT',  path: (a: any) => `/api/productos/${a?.sku || ''}` },
+                    'eliminar_producto':         { method: 'DELETE', path: (a: any) => `/api/productos/${a?.sku || ''}` },
+                    'comprar_producto':          { method: 'POST', path: (a: any) => `/api/productos/${a?.sku || ''}/compra` },
+                    'reducir_producto':          { method: 'POST', path: (a: any) => `/api/productos/${a?.sku || ''}/reducir` },
+                    'crear_categoria':           { method: 'POST', path: '/api/categorias' },
+                    'eliminar_categoria':        { method: 'DELETE', path: (a: any) => `/api/categorias/${a?.id || ''}` },
+                    'crear_metodo_pago':         { method: 'POST', path: '/api/metodos-pago' },
+                    'eliminar_metodo_pago':      { method: 'DELETE', path: (a: any) => `/api/metodos-pago/${a?.nombre || ''}` },
+                    'crear_operador':            { method: 'POST', path: '/api/operadores' },
+                    'editar_operador':           { method: 'PUT',  path: (a: any) => `/api/operadores/${a?.id || ''}` },
+                    'eliminar_operador':         { method: 'DELETE', path: (a: any) => `/api/operadores/${a?.id || ''}` },
+                    'crear_respaldo':            { method: 'POST', path: '/api/respaldos' },
+                    'cerrar_cuenta':             { method: 'POST', path: (a: any) => `/api/cuentas/${a?.ventaId || ''}/cerrar` },
+                    'abonar_cuenta':             { method: 'POST', path: (a: any) => `/api/cuentas/${a?.ventaId || ''}/abonar` },
+                    'eliminar_consumo':          { method: 'DELETE', path: (a: any) => `/api/cuentas/${a?.ventaId || ''}/consumo/${a?.consumoIdx || ''}` },
+                };
+                const r = cmdRoutes[comando];
+                if (r) {
+                    httpMethod = r.method;
+                    httpPath = typeof r.path === 'function' ? r.path(cmdArgs) : r.path;
+                    httpBody = cmdArgs;
+                } else {
+                    if (this.dataChannel?.readyState === 'open') {
+                        this.dataChannel.send(JSON.stringify({ id, error: `Unknown command: ${comando}` }));
+                    }
+                    return;
+                }
+            }
 
             try {
-                const opts: RequestInit = { method: method || 'GET' };
-                if (body) opts.body = typeof body === 'string' ? body : JSON.stringify(body);
-                const res = await fetch(`http://localhost:4000/api${path}`, {
+                const opts: RequestInit = { method: httpMethod };
+                if (httpBody) opts.body = typeof httpBody === 'string' ? httpBody : JSON.stringify(httpBody);
+                const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+                if (this.p2pSessionCookie) {
+                    headers['Cookie'] = this.p2pSessionCookie;
+                }
+                const res = await fetch(`http://localhost:${SERVER_PORT}${httpPath}`, {
                     ...opts,
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'include',
+                    headers,
                 });
                 if (res.status === 401) {
                     if (this.dataChannel && this.dataChannel.readyState === 'open') {
@@ -582,6 +883,76 @@ class AppController {
         }
     }
 
+    private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+    private keepalivePending = false;
+
+    private iniciarKeepalive(): void {
+        this.detenerKeepalive();
+        this.keepalivePending = false;
+        this.keepaliveTimer = setInterval(() => {
+            if (this.keepalivePending) {
+                this.detenerKeepalive();
+                this.reconectarP2P();
+                return;
+            }
+            if (this.dataChannel?.readyState === 'open') {
+                this.keepalivePending = true;
+                try {
+                    this.dataChannel.send(JSON.stringify({ type: 'ping', ts: Date.now() }));
+                } catch (_) {
+                    this.detenerKeepalive();
+                    this.reconectarP2P();
+                }
+            }
+        }, 20000);
+    }
+
+    private detenerKeepalive(): void {
+        if (this.keepaliveTimer) { clearInterval(this.keepaliveTimer); this.keepaliveTimer = null; }
+        this.keepalivePending = false;
+    }
+
+    private intentarIceRestart(): void {
+        if (!this.peerConnection || this.peerConnection.connectionState === 'closed') return;
+        try {
+            this.peerConnection.restartIce();
+            this.peerConnection.createOffer({ iceRestart: true }).then(offer => {
+                return this.peerConnection!.setLocalDescription(offer);
+            }).then(() => {
+                if (this.wsSignaling && this.wsSignaling.readyState === WebSocket.OPEN && this.peerConnection) {
+                    this.wsSignaling.send(JSON.stringify({
+                        type: 'offer',
+                        sdp: this.peerConnection.localDescription,
+                    }));
+                }
+            }).catch(e => {
+                console.warn('[P2P] ICE restart failed:', e);
+                this.reconectarP2P();
+            });
+        } catch (e) {
+            console.warn('[P2P] ICE restart error:', e);
+            this.reconectarP2P();
+        }
+    }
+
+    private async reconectarP2P(): Promise<void> {
+        if (this.reconectando) return;
+        this.reconectando = true;
+        this.detenerKeepalive();
+        this.limpiarPeerConnection();
+        await new Promise(r => setTimeout(r, 1500));
+        this.reconectando = false;
+        if (this.wsSignaling && this.wsSignaling.readyState === WebSocket.OPEN) {
+            this.crearPeerConnection(this.roomId);
+        }
+    }
+
+    private limpiarPeerConnection(): void {
+        if (this.offerResendTimer) { clearInterval(this.offerResendTimer); this.offerResendTimer = null; }
+        if (this.dataChannel) { try { this.dataChannel.close(); } catch (_) {} this.dataChannel = null; }
+        if (this.peerConnection) { try { this.peerConnection.close(); } catch (_) {} this.peerConnection = null; }
+    }
+
     private actualizarEstadoP2P(estado: string, texto: string): void {
         const dot = document.getElementById('p2p-status-dot');
         const text = document.getElementById('p2p-status-text');
@@ -596,10 +967,14 @@ class AppController {
     }
 
     private desconectarP2P(): void {
-        if (this.offerResendTimer) { clearInterval(this.offerResendTimer); this.offerResendTimer = null; }
-        if (this.dataChannel) { this.dataChannel.close(); this.dataChannel = null; }
-        if (this.peerConnection) { this.peerConnection.close(); this.peerConnection = null; }
+        this.detenerKeepalive();
+        this.limpiarPeerConnection();
         if (this.wsSignaling) { this.wsSignaling.close(); this.wsSignaling = null; }
+        this.p2pSessionCookie = '';
+        this.p2pConnected = false;
+        this.signalingRetries = 0;
+        this.reconectando = false;
+        delete (window as any).__DATACHANNEL__;
     }
 
     private toastError(mensaje: string): void {

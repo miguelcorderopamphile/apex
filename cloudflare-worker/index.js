@@ -7,83 +7,68 @@ export default {
     }
 
     if (url.pathname === "/ws/signaling") {
-      const pair = new WebSocketPair();
-      const [client, server] = Object.values(pair);
-
       const room = url.searchParams.get("room") || "default";
       const pin = url.searchParams.get("pin") || "";
 
-      await env.SIGNALING_ROOMS.put(
-        `pin:${room}`,
-        pin,
-        { expirationTtl: 3600 }
-      );
+      const id = env.ROOM_DO.idFromName(room);
+      const stub = env.ROOM_DO.get(id);
 
-      const ctx = { webSocket: server };
-      server.accept();
-
-      const peerId = crypto.randomUUID();
-      await addPeer(env, room, peerId, server);
-
-      server.addEventListener("message", async (event) => {
-        const peers = await getPeers(env, room);
-        for (const [pid, ws] of peers) {
-          if (pid !== peerId && ws.readyState === 1) {
-            try { ws.send(event.data); } catch (_) {}
-          }
-        }
-      });
-
-      server.addEventListener("close", async () => {
-        await removePeer(env, room, peerId);
-      });
-
-      server.addEventListener("error", async () => {
-        await removePeer(env, room, peerId);
-      });
-
-      return new Response(null, { status: 101, webSocket: client });
+      return stub.fetch(request);
     }
 
     return new Response("Not found", { status: 404 });
   },
 };
 
-async function addPeer(env, room, peerId, ws) {
-  const key = `room:${room}`;
-  const existing = await env.SIGNALING_ROOMS.get(key, { type: "json" }) || [];
-  existing.push({ peerId, connectedAt: Date.now() });
-  await env.SIGNALING_ROOMS.put(key, JSON.stringify(existing), { expirationTtl: 3600 });
-
-  if (!globalThis._wsMap) globalThis._wsMap = {};
-  globalThis._wsMap[`${room}:${peerId}`] = ws;
-}
-
-async function removePeer(env, room, peerId) {
-  const key = `room:${room}`;
-  const existing = await env.SIGNALING_ROOMS.get(key, { type: "json" }) || [];
-  const filtered = existing.filter(p => p.peerId !== peerId);
-
-  if (filtered.length === 0) {
-    await env.SIGNALING_ROOMS.delete(key);
-    await env.SIGNALING_ROOMS.delete(`pin:${room}`);
-  } else {
-    await env.SIGNALING_ROOMS.put(key, JSON.stringify(filtered), { expirationTtl: 3600 });
+export class RoomDO {
+  constructor(state, env) {
+    this._state = state;
+    this._env = env;
+    this._peers = new Map();
+    this._pin = null;
   }
 
-  if (globalThis._wsMap) {
-    delete globalThis._wsMap[`${room}:${peerId}`];
-  }
-}
+  async fetch(request) {
+    const url = new URL(request.url);
+    const pin = url.searchParams.get("pin") || "";
 
-async function getPeers(env, room) {
-  if (!globalThis._wsMap) return [];
-  const result = [];
-  for (const [key, ws] of Object.entries(globalThis._wsMap)) {
-    if (key.startsWith(`${room}:`) && ws.readyState === 1) {
-      const peerId = key.split(":").slice(1).join(":");
-      result.push([peerId, ws]);
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+
+    if (this._peers.size === 0) {
+      this._pin = pin;
+    } else if (this._pin && pin !== this._pin) {
+      server.accept();
+      server.send(JSON.stringify({ type: "error", message: "PIN incorrecto" }));
+      server.close(4001, "PIN incorrecto");
+      return new Response(null, { status: 101, webSocket: client });
     }
+
+    server.accept();
+
+    const peerId = crypto.randomUUID();
+    this._peers.set(peerId, server);
+
+    server.addEventListener("message", (event) => {
+      for (const [pid, ws] of this._peers) {
+        if (pid !== peerId && ws.readyState === 1) {
+          try { ws.send(event.data); } catch (_) {}
+        }
+      }
+    });
+
+    const cleanup = () => {
+      this._peers.delete(peerId);
+      if (this._peers.size === 0) {
+        this._state.blockConcurrencyWhile(async () => {
+          await this._state.storage.deleteAll();
+        });
+      }
+    };
+
+    server.addEventListener("close", cleanup);
+    server.addEventListener("error", cleanup);
+
+    return new Response(null, { status: 101, webSocket: client });
   }
-  return result;
 }

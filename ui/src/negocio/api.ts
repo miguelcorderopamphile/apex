@@ -21,6 +21,7 @@ interface TauriBridge {
 declare global {
     interface Window {
         __TAURI__?: TauriBridge;
+        __DATACHANNEL__?: RTCDataChannel;
     }
 }
 
@@ -608,8 +609,8 @@ class MockDemoStorage {
         { id: 'dev-2', nombre: 'Tablet Mostrador 1', ip: '192.168.1.80', ultimoAcceso: 'Hace 12 min', activo: true },
     ];
     respaldos: RespaldoInfo[] = [
-        { id: 'bk-1', fecha: 'Hoy, 06:00 PM', archivoNombre: 'DATO-DEMO-20260903-180000.datio', registros: 412, tamanoKb: 124, checksumSha256: '9f83a21b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f' },
-        { id: 'bk-2', fecha: 'Ayer, 11:30 PM', archivoNombre: 'DATO-DEMO-20260902-233000.datio', registros: 395, tamanoKb: 118, checksumSha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' },
+        { id: 'bk-1', fecha: 'Hoy, 06:00 PM', archivoNombre: 'DATO-DEMO-20260903-180000.backup', registros: 412, tamanoKb: 124, checksumSha256: '9f83a21b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f' },
+        { id: 'bk-2', fecha: 'Ayer, 11:30 PM', archivoNombre: 'DATO-DEMO-20260902-233000.backup', registros: 395, tamanoKb: 118, checksumSha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' },
     ];
     licencia: LicenciaInfo = {
         estado: 'activa',
@@ -907,6 +908,27 @@ class MockDemoStorage {
 
 const demoStore = new MockDemoStorage();
 
+const httpRoutes: Record<string, { method: string; path: string; body?: boolean }> = {
+    'crear_respaldo':              { method: 'POST', path: '/api/respaldos' },
+    'listar_respaldos':            { method: 'GET',  path: '/api/respaldos' },
+    'restaurar_desde_respaldo':    { method: 'POST', path: '/api/respaldos/restaurar', body: true },
+    'restaurar_desde_archivo':     { method: 'POST', path: '/api/respaldos/restaurar', body: true },
+    'obtener_config':              { method: 'GET',  path: '/api/config' },
+    'obtener_tasa_bcv':            { method: 'GET',  path: '/api/tasa' },
+    'listar_productos':            { method: 'GET',  path: '/api/productos' },
+    'listar_categorias':           { method: 'GET',  path: '/api/categorias' },
+    'panel':                       { method: 'GET',  path: '/api/panel' },
+    'listar_ventas':               { method: 'GET',  path: '/api/ventas' },
+    'listar_cuentas':              { method: 'GET',  path: '/api/cuentas' },
+    'obtener_jornada_actual':      { method: 'GET',  path: '/api/jornadas/actual' },
+    'listar_historico_jornadas':   { method: 'GET',  path: '/api/jornadas' },
+    'listar_dispositivos':         { method: 'GET',  path: '/api/dispositivos' },
+    'listar_metodos_pago':         { method: 'GET',  path: '/api/metodos-pago' },
+    'listar_operadores':           { method: 'GET',  path: '/api/operadores' },
+    'listar_historico_tasas':      { method: 'GET',  path: '/api/historico-tasas' },
+    'obtener_semaforo_stock':      { method: 'GET',  path: '/api/semaforo' },
+};
+
 export async function invocar<T>(comando: string, args?: Record<string, unknown>): Promise<T> {
     const puente = window.__TAURI__;
     const invocador = puente?.core?.invoke;
@@ -918,8 +940,58 @@ export async function invocar<T>(comando: string, args?: Record<string, unknown>
         }
     }
 
-    // Modo Demo Web en Navegador (Cloudflare Pages /demo)
+    const dc = window.__DATACHANNEL__;
+    if (dc && dc.readyState === 'open') {
+        const dcResult = await dcInvocar<T>(dc, comando, args).catch(() => null);
+        if (dcResult !== null) return dcResult;
+    }
+
+    const httpResult = await httpInvocar<T>(comando, args).catch(() => null);
+    if (httpResult !== null) return httpResult;
+
     return mockInvocar<T>(comando, args);
+}
+
+let dcIdCounter = 0;
+const dcPending = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+
+function dcInvocar<T>(dc: RTCDataChannel, comando: string, args?: Record<string, unknown>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const id = `dc-${++dcIdCounter}-${Date.now()}`;
+        const timer = setTimeout(() => {
+            dcPending.delete(id);
+            reject(new Error('DataChannel timeout'));
+        }, 15000);
+        dcPending.set(id, { resolve, reject, timer });
+        (window as any).__P2P_PENDING__ = dcPending;
+        try {
+            dc.send(JSON.stringify({ id, comando, args }));
+        } catch (e) {
+            clearTimeout(timer);
+            dcPending.delete(id);
+            reject(e instanceof Error ? e : new Error(String(e)));
+        }
+    });
+}
+
+async function httpInvocar<T>(comando: string, args?: Record<string, unknown>): Promise<T | null> {
+    const route = httpRoutes[comando];
+    if (!route) return null;
+
+    const opts: RequestInit = { method: route.method, headers: { 'Content-Type': 'application/json' } };
+    if (route.body && args) {
+        if (comando === 'restaurar_desde_archivo') {
+            opts.body = JSON.stringify({
+                contenido_base64: args.contenidoBase64,
+                nombre_archivo: args.nombreArchivo,
+            });
+        } else {
+            opts.body = JSON.stringify(args);
+        }
+    }
+    const res = await fetch(route.path, opts);
+    if (!res.ok) throw new ApiError(`HTTP ${res.status}`);
+    return (await res.json()) as T;
 }
 
 function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promise<T> {
@@ -1019,11 +1091,13 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
                 if (prod) {
                     const cant = Number(item.cantidad);
                     const modo = item.modo_venta || 'unidad';
-                    const esPaquete = modo === 'paquete' && prod.precioPaqueteUsd;
-                    const precioEfectivo = esPaquete ? Number(prod.precioPaqueteUsd) : Number(prod.precioUsd);
-                    const unidadesBase = esPaquete ? (prod.unidadesPorCaja || 1) : 1;
+                    const esPaquete = modo === 'paquete' && (prod.precioPaqueteUsd || (prod.esCaja && prod.unidadesPorCaja && prod.unidadesPorCaja > 1));
+                    const unidadesPaquete = esPaquete ? (prod.unidadesPorCaja || 1) : 1;
+                    const precioEfectivo = esPaquete
+                        ? (prod.precioPaqueteUsd ? Number(prod.precioPaqueteUsd) : Number(prod.precioUsd) * unidadesPaquete)
+                        : Number(prod.precioUsd);
                     totalUsd += precioEfectivo * cant;
-                    prod.stock = String(Math.max(0, Number(prod.stock) - unidadesBase * cant));
+                    prod.stock = String(Math.max(0, Number(prod.stock) - unidadesPaquete * cant));
                 }
             });
             const totalBs = totalUsd * tasa;
@@ -1145,10 +1219,12 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
             const cuenta = demoStore.cuentas.find((c) => c.ventaId === ventaId);
             const prod = demoStore.productos.find((p) => p.sku.trim().toUpperCase() === sku);
             if (cuenta && prod) {
-                const esPaquete = modo === 'paquete' && prod.precioPaqueteUsd;
-                const precioEfectivo = esPaquete ? parseNum(prod.precioPaqueteUsd) : parseNum(prod.precioUsd);
-                const unidadesBase = esPaquete ? (prod.unidadesPorCaja || 1) : 1;
-                const unidades = cant * unidadesBase;
+                const esPaquete = modo === 'paquete' && (prod.precioPaqueteUsd || (prod.esCaja && prod.unidadesPorCaja && prod.unidadesPorCaja > 1));
+                const unidadesPaquete = esPaquete ? (prod.unidadesPorCaja || 1) : 1;
+                const precioEfectivo = esPaquete
+                    ? (prod.precioPaqueteUsd ? parseNum(prod.precioPaqueteUsd) : parseNum(prod.precioUsd) * unidadesPaquete)
+                    : parseNum(prod.precioUsd);
+                const unidades = cant * unidadesPaquete;
                 if (!prod.sinStock) {
                     const st = parseNum(prod.stock);
                     if (st < unidades) {
@@ -1407,12 +1483,14 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
                 const precioBruto = Number(p.precioBrutoUsd) || 0;
                 if (precioVenta > 0) {
                     totalVentaCatalogoUsd += precioVenta;
-                    totalCostoCatalogoUsd += precioBruto > 0 ? precioBruto : precioVenta * 0.65;
+                    if (precioBruto > 0) {
+                        totalCostoCatalogoUsd += precioBruto;
+                    }
                 }
             });
-            const margenPromedio = totalVentaCatalogoUsd > 0
+            const margenPromedio = totalVentaCatalogoUsd > 0 && totalCostoCatalogoUsd > 0
                 ? (totalVentaCatalogoUsd - totalCostoCatalogoUsd) / totalVentaCatalogoUsd
-                : 0.35;
+                : 0;
             const costoTotalUsd = totalVentasUsd * (1 - margenPromedio);
             const gananciaBrutaUsd = totalVentasUsd - costoTotalUsd;
             const impuestosUsd = totalVentasUsd * 0.12;
@@ -1625,7 +1703,7 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
             const hh = String(now.getHours()).padStart(2, '0');
             const min = String(now.getMinutes()).padStart(2, '0');
             const ss = String(now.getSeconds()).padStart(2, '0');
-            const archivoNombre = `${nomNegocio}-${yyyy}${mm}${dd}-${hh}${min}${ss}.datio`;
+            const archivoNombre = `${nomNegocio}-${yyyy}${mm}${dd}-${hh}${min}${ss}.backup`;
 
             const resp: RespaldoInfo = {
                 id,
@@ -1663,7 +1741,7 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
         case 'generar_qr_panel': {
             const roomId = 'room-' + Math.random().toString(36).slice(2, 10);
             const signalingBase = (window as any).__SIGNALING_URL__
-                || 'https://datiolabs-signaling.<tu-subdominio>.workers.dev';
+                || 'https://datiolabs-signaling.apex-importvcb.workers.dev';
             const url = `${signalingBase}/ws/signaling?room=${roomId}`;
             return Promise.resolve({ url, qrBase64: '', roomId } as unknown as T);
         }
@@ -1881,12 +1959,11 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
             const ahora = new Date();
             const horaStr = ahora.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit' });
             const fechaStr = `${ahora.toLocaleDateString('es-VE')} ${horaStr}`;
-            const jor = demoStore.jornadaActual;
+            const jor = { ...demoStore.jornadaActual };
             jor.estado = 'cerrada';
             jor.finUnix = Math.floor(Date.now() / 1000);
             jor.finStr = `${fechaStr}`;
             jor.tasaFin = demoStore.tasaActual.valor;
-            // Sellado con Checksum SHA-256
             jor.checksumSha256 = Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
             demoStore.historicoJornadas.unshift(jor);
             demoStore.jornadaActual = null;
@@ -1971,6 +2048,8 @@ export const api = {
     respaldos: () => invocar<RespaldoInfo[]>('listar_respaldos'),
     crearRespaldo: () => invocar<RespaldoInfo>('crear_respaldo'),
     restaurarRespaldo: (archivo?: string) => invocar<boolean>('restaurar_desde_respaldo', { archivo }),
+    restaurarDesdeArchivo: (contenidoBase64: string, nombreArchivo: string) =>
+        invocar<BackupMetadata>('restaurar_desde_archivo', { contenidoBase64, nombreArchivo }),
     licencia: () => invocar<LicenciaInfo>('obtener_licencia'),
     validarLicencia: (clave: string) => invocar<boolean>('validar_licencia', { clave }),
     generarQr: () => invocar<{ url: string; qrBase64: string; roomId: string }>('generar_qr_panel'),

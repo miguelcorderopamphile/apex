@@ -142,14 +142,14 @@ export class WizardView {
                     </div>
 
                     <div>
-                        <label class="block font-heading font-bold text-xs uppercase tracking-wide mb-2">Selecciona o arrastra el archivo de respaldo (.datio):</label>
+                        <label class="block font-heading font-bold text-xs uppercase tracking-wide mb-2">Selecciona o arrastra el archivo de respaldo (.backup):</label>
                         <div class="border-2 border-dashed border-brand-black rounded-lg p-6 text-center bg-gray-50 hover:bg-gray-100 transition-colors cursor-pointer" id="drop-zona">
                             <svg class="w-10 h-10 mx-auto text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
                             </svg>
                             <p class="font-heading font-black text-sm text-brand-black mb-1">Haz clic para cargar archivo de respaldo</p>
-                            <p class="text-[11px] font-mono text-gray-500">Formato: NOMBRE-NEGOCIO-FECHA-HORA.datio</p>
-                            <input type="file" id="wz-archivo-input" accept=".datio,.bin,.json" class="hidden" />
+                            <p class="text-[11px] font-mono text-gray-500">Formato: datio_FECHA.backup</p>
+                            <input type="file" id="wz-archivo-input" accept=".backup,.datio,.bin" class="hidden" />
                         </div>
                         <div id="wz-archivo-cargado" class="hidden mt-2 p-2 bg-green-50 border border-brand-black rounded text-xs font-mono font-bold text-green-900 flex justify-between items-center">
                             <span id="wz-nombre-archivo"></span>
@@ -331,7 +331,14 @@ export class WizardView {
         const pin = this.bloquearPanel ? (pinInput?.value.trim() || '') : '';
 
         const f = fileInput?.files?.[0];
-        const nombreArchivo = f?.name || 'DATIOLABS-DEMO-20260903-180000.datio';
+
+        if (!f) {
+            if (errorBox) {
+                errorBox.textContent = 'Selecciona un archivo de respaldo.';
+                errorBox.classList.remove('hidden');
+            }
+            return;
+        }
 
         if (this.bloquearPanel && !pin) {
             if (errorBox) {
@@ -342,10 +349,23 @@ export class WizardView {
         }
 
         try {
-            // Restaurar datos y purgar conexiones móviles por seguridad
-            await api.restaurarRespaldo(nombreArchivo);
+            const contenidoBase64 = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const result = reader.result;
+                    if (typeof result === 'string') {
+                        const base64 = result.split(',')[1] || '';
+                        resolve(base64);
+                    } else {
+                        reject(new Error('Error leyendo archivo'));
+                    }
+                };
+                reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
+                reader.readAsDataURL(f);
+            });
 
-            // Config ya viene en el respaldo, solo cargar
+            await api.restaurarDesdeArchivo(contenidoBase64, f.name);
+
             const cfg = await api.config();
             if (cfg) this.alTerminar(cfg);
             else throw new Error('Respaldo restaurado pero no se pudo cargar la configuración');

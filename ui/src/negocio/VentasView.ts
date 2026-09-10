@@ -107,6 +107,23 @@ export class VentasView {
         this.modelo = modelo;
     }
 
+    private parseFechaUnix(fechaHora?: string): number {
+        if (!fechaHora) return 0;
+        const m = fechaHora.match(/(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2}):(\d{2})/);
+        if (m && m[1] && m[2] && m[3] && m[4] && m[5] && m[6]) {
+            const parsed = Date.UTC(
+                parseInt(m[1], 10),
+                parseInt(m[2], 10) - 1,
+                parseInt(m[3], 10),
+                parseInt(m[4], 10),
+                parseInt(m[5], 10),
+                parseInt(m[6], 10),
+            );
+            if (!isNaN(parsed)) return Math.floor(parsed / 1000);
+        }
+        return 0;
+    }
+
     async render(): Promise<void> {
         const [jornadaActual, historico, tickets] = await Promise.all([
             api.obtenerJornadaActual(),
@@ -307,9 +324,15 @@ export class VentasView {
             ? j.operadoresRelevo.join(', ')
             : j.operadorActual;
 
-        const ticketsDeJornada = this.todosLosTickets.filter((t) =>
-            t.operador && j.operadoresRelevo.some((op) => t.operador === op)
-        );
+        const ticketsDeJornada = this.todosLosTickets.filter((t) => {
+            const ts = t.fechaUnix && t.fechaUnix > 0
+                ? t.fechaUnix
+                : this.parseFechaUnix(t.fechaHora);
+            if (ts <= 0) return false;
+            if (ts < j.inicioUnix) return false;
+            if (j.finUnix && ts > j.finUnix) return false;
+            return true;
+        });
 
         const acumuladoPorMetodo: Record<string, { usd: number; bs: number }> = {};
         ticketsDeJornada.forEach((t) => {

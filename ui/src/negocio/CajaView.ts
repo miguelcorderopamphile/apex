@@ -1189,7 +1189,7 @@ export class CajaView {
                     textoStock = `${stockNum} ${unidadStr}`;
                 }
 
-                const tienePaquete = p.precioPaqueteUsd && p.nombrePaquete;
+                const tienePaquete = (p.precioPaqueteUsd && p.nombrePaquete) || (p.esCaja && p.unidadesPorCaja && p.unidadesPorCaja > 1);
 
                 return `
                 <div class="relative" data-producto-card="${p.sku}">
@@ -1213,7 +1213,7 @@ export class CajaView {
                     <button data-sku="${p.sku}" data-modo="paquete" ${sinStock && !p.sinStock ? 'disabled' : ''}
                         class="text-left border-2 border-brand-purple rounded p-2 bg-purple-50 shadow-brutal hover:-translate-y-0.5 hover:shadow-brutal-hover transition-all active:translate-y-0.5 active:shadow-none disabled:opacity-30 w-full mt-1">
                         <div class="flex justify-between items-center">
-                            <span class="font-heading font-bold text-xs text-purple-800">${p.nombrePaquete} ($${Number(p.precioPaqueteUsd).toFixed(2)})</span>
+                            <span class="font-heading font-bold text-xs text-purple-800">${p.nombrePaquete || 'Caja'} (${p.precioPaqueteUsd ? `$${Number(p.precioPaqueteUsd).toFixed(2)}` : `$${(Number(p.precioUsd) * (p.unidadesPorCaja || 1)).toFixed(2)}`})</span>
                             <span class="text-[10px] font-black text-purple-600">${p.unidadesPorCaja || 1} un.</span>
                         </div>
                     </button>` : ''}

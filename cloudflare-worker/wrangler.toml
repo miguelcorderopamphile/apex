@@ -1,6 +1,19 @@
 name = "datiolabs-signaling"
 main = "index.js"
 compatibility_date = "2024-01-01"
+account_id = "b075ad2bb6041dc60a1d68fbbc4044e4"
 
 [observability]
 enabled = true
+
+[[kv_namespaces]]
+binding = "SIGNALING_ROOMS"
+id = "2d5c429247624f798806d24905b5fa4f"
+
+[[durable_objects.bindings]]
+name = "ROOM_DO"
+class_name = "RoomDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomDO"]

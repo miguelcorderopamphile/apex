@@ -1,6 +1,9 @@
 mod error;
 mod tasa_bcv;
 
+/// Puerto del servidor HTTP/Axum. Cambiar aquí y en los URLs de QR.
+const SERVIDOR_PORT: u16 = 4000;
+
 use datiolabs_core::capacidades::{
     self, ErrorNegocio, capacidades_de_rubros, rubros_activos, validar_linea,
 };
@@ -46,6 +49,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use tokio::sync::{broadcast, mpsc};
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::services::ServeDir;
 
 const SESSION_TTL_SECS: u64 = 7 * 24 * 3600;
 const SESSION_KEY_PREFIX: &[u8] = b"session:";
@@ -242,6 +246,30 @@ async fn api_auth_logout(
 
 async fn serve_panel_html() -> Html<&'static str> {
     Html(include_str!("../panel.html"))
+}
+
+async fn serve_bootstrap_html() -> Html<&'static str> {
+    Html(include_str!("../bootstrap.html"))
+}
+
+async fn api_spa_content() -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let html_raw = include_str!("../../ui/dist/index.html");
+    let assets_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ui/dist/assets");
+    let js_files = std::fs::read_dir(&assets_path)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error reading assets: {e}")))?;
+    let mut js_url = String::new();
+    let mut css_url = String::new();
+    for entry in js_files.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.ends_with(".js") { js_url = format!("/assets/{}", name); }
+        if name.ends_with(".css") { css_url = format!("/assets/{}", name); }
+    }
+    let html = html_raw.replace("href=\"assets/", "href=\"/assets/").replace("src=\"assets/", "src=\"/assets/");
+    Ok(Json(serde_json::json!({
+        "html": html,
+        "jsUrl": js_url,
+        "cssUrl": css_url,
+    })))
 }
 
 async fn api_panel(State(state): State<AxumAppState>) -> Result<Json<PanelDto>, (StatusCode, String)> {
@@ -1332,6 +1360,22 @@ async fn api_pin_cambiar(State(state): State<AxumAppState>, Json(body): Json<Has
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
+// Config
+async fn api_config(State(state): State<AxumAppState>) -> Result<Json<ConfigDto>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let cfg = db.cargar_config().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?
+        .ok_or((StatusCode::NOT_FOUND, "No hay configuración".to_string()))?;
+    Ok(Json(ConfigDto {
+        capacidades: capacidades_de_rubros(cfg.rubros),
+        tiene_pin: !cfg.pin_dueno_sha256.is_empty(),
+        nombre: cfg.nombre.as_str().to_string(),
+        rubros: cfg.rubros,
+        licencia_estado: cfg.licencia_estado,
+        licencia_titular: cfg.licencia_titular,
+        privacidad_inventario: cfg.privacidad_inventario,
+    }))
+}
+
 // Privacidad de inventario
 async fn api_config_privacidad(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, bool>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let valor = body.get("privacidadInventario").copied().unwrap_or(false);
@@ -1433,6 +1477,23 @@ async fn api_respaldos_crear(state: State<AxumAppState>) -> Result<Json<Respaldo
     }))
 }
 async fn api_respaldos_restaurar(state: State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    use base64::Engine;
+    if let Some(contenido) = body.get("contenido_base64") {
+        let nombre = body.get("nombre_archivo").cloned().unwrap_or_else(|| format!("{}.backup", ahora_unix()));
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(contenido)
+            .map_err(|e| (StatusCode::BAD_REQUEST, format!("Base64 inválido: {e}")))?;
+        let dir = get_backup_dir().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error directorio: {e}")))?;
+        std::fs::create_dir_all(&dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error directorio: {e}")))?;
+        let safe_name = nombre.replace(['/', '\\', '\0'], "_");
+        let ruta = std::path::Path::new(&dir).join(&safe_name);
+        std::fs::write(&ruta, &bytes).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error escritura: {e}")))?;
+        let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+        db.importar_backup(&ruta.to_string_lossy()).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error al restaurar: {e}")))?;
+        drop(db);
+        let _ = state.tx.send(());
+        return Ok(Json(serde_json::json!({ "ok": true })));
+    }
     let archivo = body.get("archivo").cloned().unwrap_or_default();
     let dir = get_backup_dir().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error directorio: {e}")))?;
     let ruta = if archivo.is_empty() {
@@ -2293,7 +2354,14 @@ fn registrar_venta(
             validar_linea(catalogo.capacidades(idx), cantidad, catalogo.stock(idx))?;
             toques.push((idx, cantidad));
             let precio_efectivo = if modo == "paquete" {
-                catalogo.precio_paquete_usd(idx).unwrap_or(catalogo.precio_usd(idx))
+                match catalogo.precio_paquete_usd(idx) {
+                    Some(p) => p,
+                    None => {
+                        // Paquete sin precio explícito: precio unitario × unidades por caja
+                        let upc = Decimal::from(catalogo.unidades_por_caja(idx).unwrap_or(1));
+                        catalogo.precio_usd(idx) * upc
+                    }
+                }
             } else {
                 catalogo.precio_usd(idx)
             };
@@ -2597,7 +2665,13 @@ fn agregar_consumo(
 
         let sku_obj = catalogo.sku_obj(idx);
         let precio_efectivo = if modo == "paquete" {
-            catalogo.precio_paquete_usd(idx).unwrap_or(catalogo.precio_usd(idx))
+            match catalogo.precio_paquete_usd(idx) {
+                Some(p) => p,
+                None => {
+                    let upc = Decimal::from(catalogo.unidades_por_caja(idx).unwrap_or(1));
+                    catalogo.precio_usd(idx) * upc
+                }
+            }
         } else {
             catalogo.precio_usd(idx)
         };
@@ -3103,7 +3177,7 @@ fn generar_qr_panel(state: tauri::State<AppState>) -> Result<QrData, UIError> {
         }
     };
     let room_id = Uuid::new_v4().to_string();
-    let url = format!("http://{}:4000/panel?room={}", ip, room_id);
+    let url = format!("http://{}:{}/bootstrap?room={}", ip, SERVIDOR_PORT, room_id);
 
     let code = qrcode::QrCode::new(url.as_bytes())
         .map_err(|e| UIError::new("error generando QR", &e.to_string()))?;
@@ -3130,7 +3204,7 @@ fn generar_qr_panel(state: tauri::State<AppState>) -> Result<QrData, UIError> {
 #[tauri::command]
 fn abrir_panel_movil(app: tauri::AppHandle) -> Result<(), UIError> {
     let ip = get_lan_ip()?;
-    let url = format!("http://{}:4000/panel", ip);
+    let url = format!("http://{}:{}/panel", ip, SERVIDOR_PORT);
     let webview_url = url
         .parse::<tauri::Url>()
         .map_err(|e| UIError::new("error parseando URL", &e.to_string()))?;
@@ -3621,7 +3695,7 @@ fn abrir_jornada(
     }
     let ops = operadores.unwrap_or_default();
     let jornada = Jornada {
-        id: format!("JOR-{}-01", chrono::Utc::now().format("%Y%m%d")),
+        id: format!("JOR-{}-{}", chrono::Utc::now().format("%Y%m%d"), Uuid::new_v4().to_string()[..6].to_uppercase()),
         estado: "abierta".to_string(),
         inicio_unix: ahora_unix(),
         fin_unix: None,
@@ -3911,6 +3985,35 @@ fn restaurar_desde_respaldo(
     importar_backup(state, payload).map(|_| true)
 }
 
+#[tauri::command]
+fn restaurar_desde_archivo(
+    state: tauri::State<AppState>,
+    contenido_base64: String,
+    nombre_archivo: String,
+) -> Result<BackupMetadataDto, UIError> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&contenido_base64)
+        .map_err(|e| UIError::new("archivo corrupto", &e.to_string()))?;
+    let dir = get_backup_dir()?;
+    std::fs::create_dir_all(&dir).map_err(|e| UIError::new("error directorio", &e.to_string()))?;
+    let safe_name = nombre_archivo.replace(['/', '\\', '\0'], "_");
+    let ruta = std::path::Path::new(&dir).join(&safe_name);
+    std::fs::write(&ruta, &bytes)
+        .map_err(|e| UIError::new("error escribiendo archivo", &e.to_string()))?;
+    let payload = BackupRuta {
+        ruta: ruta.to_string_lossy().to_string(),
+    };
+    let meta = importar_backup(state, payload)?;
+    Ok(BackupMetadataDto {
+        version: meta.version,
+        timestamp_unix: meta.timestamp_unix,
+        arboles: meta.arboles,
+        total_registros: meta.total_registros,
+        checksum_sha256: meta.checksum_sha256,
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -4006,6 +4109,7 @@ pub fn run() {
                     .route("/api/semaforo", get(api_semaforo_obtener))
                     .route("/api/semaforo", post(api_semaforo_guardar))
                     .route("/api/pin/cambiar", post(api_pin_cambiar))
+                    .route("/api/config", get(api_config))
                     .route("/api/config/privacidad", post(api_config_privacidad))
                     .route("/api/respaldos", get(api_respaldos_listar))
                     .route("/api/respaldos", post(api_respaldos_crear))
@@ -4016,12 +4120,17 @@ pub fn run() {
                         auth_middleware,
                     ));
 
+                let spa_dist_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../ui/dist");
                 let public = Router::new()
                     .route("/api/auth/login", post(api_auth_login))
                     .route("/api/auth/logout", post(api_auth_logout))
                     .route("/api/events", get(api_sse_events))
                     .route("/ws/signaling", get(ws_signaling_handler))
-                    .route("/panel", get(serve_panel_html));
+                    .route("/panel", get(serve_panel_html))
+                    .route("/bootstrap", get(serve_bootstrap_html))
+                    .route("/api/spa", get(api_spa_content))
+                    .fallback_service(ServeDir::new(spa_dist_path).append_index_html_on_directories(false));
 
                 let app = Router::new()
                     .merge(public)
@@ -4037,9 +4146,9 @@ pub fn run() {
                         rate_limiter: RateLimiter::new(5, 300), // 5 intentos, lockout 5 minutos
                     });
 
-                if let Ok(listener) = tokio::net::TcpListener::bind("0.0.0.0:4000").await {
+                if let Ok(listener) = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", SERVIDOR_PORT)).await {
                     // Try UPnP for automatic port forwarding
-                    let upnp_ip = try_upnp(4000).await;
+                    let upnp_ip = try_upnp(SERVIDOR_PORT).await;
                     if let Some(ref ip) = upnp_ip {
                         println!("[UPnP] External IP: {}", ip);
                         // Store external IP in app state for QR generation
@@ -4050,7 +4159,7 @@ pub fn run() {
                         println!("[UPnP] Could not set up port forwarding");
                     }
                     
-                    println!("[Server] Listening on 0.0.0.0:4000");
+                    println!("[Server] Listening on 0.0.0.0:{}", SERVIDOR_PORT);
                     let _ = axum::serve(listener, app).await;
                 }
             });
@@ -4125,7 +4234,8 @@ pub fn run() {
             listar_historico_tasas,
             crear_respaldo,
             listar_respaldos,
-            restaurar_desde_respaldo
+            restaurar_desde_respaldo,
+            restaurar_desde_archivo
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {
