@@ -220,6 +220,7 @@ export interface ConsumoCuenta {
     cantidad: number;
     precioUsd: string;
     subtotalUsd: string;
+    modoVenta?: string;
 }
 
 export interface CuentaAbierta {
@@ -1008,7 +1009,8 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
             // Idempotency check for demo store
             if (idempotencyKey && demoStore.dedupVentas?.[idempotencyKey]) {
                 const existing = demoStore.dedupVentas[idempotencyKey];
-                return demoStore.tickets.find(t => t.ventaId === existing);
+                const ticket = demoStore.tickets.find(t => t.ventaId === existing);
+                if (ticket) return Promise.resolve(ticket as unknown as T);
             }
             let totalUsd = 0;
             const tasa = Number(demoStore.tasaActual.valor);
@@ -1916,6 +1918,7 @@ export const api = {
         precioUsd: string; impuestoPct: string; stockInicial: string;
         pesable: boolean; alcoholica: boolean; categoriaId?: string; sinStock?: boolean;
         unidad?: 'un' | 'kg' | 'ml'; esCaja?: boolean; unidadesPorCaja?: number;
+        precioPaqueteUsd?: string; nombrePaquete?: string;
     }) => {
         const sku = p.sku && p.sku.trim() ? p.sku.trim().toUpperCase() : 'PROD-' + Math.random().toString(36).slice(2, 8).toUpperCase();
         return invocar<void>('crear_producto', { input: { ...p, sku } });
@@ -1923,7 +1926,7 @@ export const api = {
     eliminarProducto: (sku: string) => invocar<void>('eliminar_producto', { sku }),
     registrarVenta: (
         items: { sku: string; cantidad: string; modo_venta?: string }[],
-        mayor: boolean,
+        _mayor: boolean,
         recibido: string,
         pagos?: PagoTicket[],
         resolucionVuelto?: ResolucionVuelto,

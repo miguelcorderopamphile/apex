@@ -907,7 +907,6 @@ export class InventarioView {
                             this.renderRepoLista();
                             this.renderCatalogoLista();
                         });
-                        });
                     });
                 }
             });
