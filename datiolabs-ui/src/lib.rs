@@ -9,7 +9,7 @@ use datiolabs_core::capacidades::{
 };
 use datiolabs_core::db::{Database as Ledger, DbError};
 use datiolabs_core::models::{
-    Catalogo, Categoria, ConfigNegocio, DispositivoRemoto, EstadoVenta, Jornada, LineasVenta,
+    Catalogo, Categoria, ConfigNegocio, EstadoVenta, Jornada, LineasVenta,
     MetodoPagoConfig, MotivoMovimiento, MovimientoStock, Nombre, Operador, PagoVenta, Producto,
     SemaforoStock, Sku, TasaImpuesto, Venta,
 };
@@ -2225,83 +2225,7 @@ async fn api_jornadas_relevar(
     ))
 }
 
-// Dispositivos
-async fn api_dispositivos_listar(
-    State(state): State<AxumAppState>,
-) -> Result<Json<Vec<datiolabs_core::models::DispositivoRemoto>>, (StatusCode, String)> {
-    let db = state.ledger.lock().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Error interno: {e}"),
-        )
-    })?;
-    Ok(Json(db.listar_dispositivos().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Error interno: {e}"),
-        )
-    })?))
-}
-async fn api_dispositivos_registrar(
-    State(state): State<AxumAppState>,
-    Json(body): Json<HashMap<String, String>>,
-) -> Result<Json<Vec<datiolabs_core::models::DispositivoRemoto>>, (StatusCode, String)> {
-    let nombre = body.get("nombre").cloned().unwrap_or_default();
-    let d = datiolabs_core::models::DispositivoRemoto {
-        id: format!("dev-{}", uuid::Uuid::new_v4().to_string()[..8].to_string()),
-        nombre,
-        ip: String::new(),
-        ultimo_acceso: String::new(),
-        activo: true,
-    };
-    let db = state.ledger.lock().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Error interno: {e}"),
-        )
-    })?;
-    db.guardar_dispositivo(&d).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Error interno: {e}"),
-        )
-    })?;
-    let result = db.listar_dispositivos().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Error interno: {e}"),
-        )
-    })?;
-    drop(db);
-    let _ = state.tx.send(());
-    Ok(Json(result))
-}
-async fn api_dispositivos_revocar(
-    State(state): State<AxumAppState>,
-    Path(id): Path<String>,
-) -> Result<Json<Vec<datiolabs_core::models::DispositivoRemoto>>, (StatusCode, String)> {
-    let db = state.ledger.lock().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Error interno: {e}"),
-        )
-    })?;
-    db.eliminar_dispositivo(&id).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Error interno: {e}"),
-        )
-    })?;
-    let result = db.listar_dispositivos().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Error interno: {e}"),
-        )
-    })?;
-    drop(db);
-    let _ = state.tx.send(());
-    Ok(Json(result))
-}
+
 
 // Semaforo
 async fn api_semaforo_obtener(
@@ -4793,42 +4717,7 @@ fn alternar_operador(estado: tauri::State<AppState>, id: String) -> Result<Vec<O
     Ok(con_ledger(&estado, |db| db.listar_operadores())?)
 }
 
-// ---------------- comandos: dispositivos ----------------
 
-#[tauri::command]
-fn listar_dispositivos(estado: tauri::State<AppState>) -> Result<Vec<DispositivoRemoto>, UIError> {
-    config_requerida(&estado)?;
-    Ok(con_ledger(&estado, |db| db.listar_dispositivos())?)
-}
-
-#[tauri::command]
-fn registrar_dispositivo(
-    estado: tauri::State<AppState>,
-    nombre: String,
-) -> Result<Vec<DispositivoRemoto>, UIError> {
-    config_requerida(&estado)?;
-    let d = DispositivoRemoto {
-        id: format!("dev-{}", Uuid::new_v4().to_string()[..8].to_string()),
-        nombre,
-        ip: String::new(),
-        ultimo_acceso: String::new(),
-        activo: true,
-    };
-    con_ledger(&estado, |db| db.guardar_dispositivo(&d))?;
-    notificar_panel(&estado);
-    Ok(con_ledger(&estado, |db| db.listar_dispositivos())?)
-}
-
-#[tauri::command]
-fn revocar_dispositivo(
-    estado: tauri::State<AppState>,
-    id: String,
-) -> Result<Vec<DispositivoRemoto>, UIError> {
-    config_requerida(&estado)?;
-    con_ledger(&estado, |db| db.eliminar_dispositivo(&id))?;
-    notificar_panel(&estado);
-    Ok(con_ledger(&estado, |db| db.listar_dispositivos())?)
-}
 
 // ---------------- comandos: semaforo stock ----------------
 
@@ -5503,9 +5392,6 @@ pub fn run() {
                     .route("/api/jornadas/cerrar", post(api_jornadas_cerrar))
                     .route("/api/jornadas/asignar", post(api_jornadas_asignar))
                     .route("/api/jornadas/relevar", post(api_jornadas_relevar))
-                    .route("/api/dispositivos", get(api_dispositivos_listar))
-                    .route("/api/dispositivos", post(api_dispositivos_registrar))
-                    .route("/api/dispositivos/:id", delete(api_dispositivos_revocar))
                     .route("/api/semaforo", get(api_semaforo_obtener))
                     .route("/api/semaforo", post(api_semaforo_guardar))
                     .route("/api/pin/cambiar", post(api_pin_cambiar))
@@ -5612,9 +5498,6 @@ pub fn run() {
             editar_operador,
             eliminar_operador,
             alternar_operador,
-            listar_dispositivos,
-            registrar_dispositivo,
-            revocar_dispositivo,
             obtener_semaforo_stock,
             guardar_semaforo_stock,
             cambiar_pin_dueno,

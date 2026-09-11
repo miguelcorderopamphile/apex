@@ -59,13 +59,6 @@ export interface Categoria {
     nombre: string;
 }
 
-export interface DispositivoRemoto {
-    id: string;
-    nombre: string;
-    ip: string;
-    ultimoAcceso: string;
-    activo: boolean;
-}
 
 export interface RespaldoInfo {
     id: string;
@@ -603,10 +596,6 @@ class MockDemoStorage {
         { nombre: 'ZELLE', moneda: 'USD' },
         { nombre: 'BINAN.USDT', moneda: 'USD' },
     ];
-    dispositivos: DispositivoRemoto[] = [
-        { id: 'dev-1', nombre: 'iPhone 15 Pro (Dueño)', ip: '192.168.1.45', ultimoAcceso: 'Hace 5 min', activo: true },
-        { id: 'dev-2', nombre: 'Tablet Mostrador 1', ip: '192.168.1.80', ultimoAcceso: 'Hace 12 min', activo: true },
-    ];
     respaldos: RespaldoInfo[] = [
         { id: 'bk-1', fecha: 'Hoy, 06:00 PM', archivoNombre: 'DATO-DEMO-20260903-180000.backup', registros: 412, tamanoKb: 124, checksumSha256: '9f83a21b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f' },
         { id: 'bk-2', fecha: 'Ayer, 11:30 PM', archivoNombre: 'DATO-DEMO-20260902-233000.backup', registros: 395, tamanoKb: 118, checksumSha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' },
@@ -822,7 +811,6 @@ class MockDemoStorage {
                 if (parsed.categorias) this.categorias = parsed.categorias;
                 if (parsed.tasasImpuestos) this.tasasImpuestos = parsed.tasasImpuestos;
                 if (parsed.tasaActual) this.tasaActual = parsed.tasaActual;
-                if (parsed.dispositivos) this.dispositivos = parsed.dispositivos;
                 if (parsed.respaldos) this.respaldos = parsed.respaldos;
                 if (parsed.historicoTasas) this.historicoTasas = parsed.historicoTasas;
                 if (parsed.tickets && Array.isArray(parsed.tickets) && parsed.tickets.length > 0) this.tickets = parsed.tickets;
@@ -888,7 +876,6 @@ class MockDemoStorage {
                 categorias: this.categorias,
                 tasasImpuestos: this.tasasImpuestos,
                 tasaActual: this.tasaActual,
-                dispositivos: this.dispositivos,
                 respaldos: this.respaldos,
                 historicoTasas: this.historicoTasas,
                 tickets: this.tickets,
@@ -921,7 +908,6 @@ const httpRoutes: Record<string, { method: string; path: string; body?: boolean 
     'listar_cuentas':              { method: 'GET',  path: '/api/cuentas' },
     'obtener_jornada_actual':      { method: 'GET',  path: '/api/jornadas/actual' },
     'listar_historico_jornadas':   { method: 'GET',  path: '/api/jornadas' },
-    'listar_dispositivos':         { method: 'GET',  path: '/api/dispositivos' },
     'listar_metodos_pago':         { method: 'GET',  path: '/api/metodos-pago' },
     'listar_operadores':           { method: 'GET',  path: '/api/operadores' },
     'listar_historico_tasas':      { method: 'GET',  path: '/api/historico-tasas' },
@@ -1666,28 +1652,6 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
             }
             return Promise.resolve('0' as unknown as T);
         }
-        case 'listar_dispositivos':
-            return Promise.resolve(demoStore.dispositivos as unknown as T);
-        case 'registrar_dispositivo': {
-            const nombre = String(args?.nombre || 'Dispositivo Móvil').trim();
-            const id = 'dev-' + Math.random().toString(36).slice(2, 7);
-            const dev: DispositivoRemoto = {
-                id,
-                nombre,
-                ip: '192.168.1.' + Math.floor(Math.random() * 200 + 20),
-                ultimoAcceso: 'Ahora mismo',
-                activo: true,
-            };
-            demoStore.dispositivos.push(dev);
-            demoStore.persist();
-            return Promise.resolve(demoStore.dispositivos as unknown as T);
-        }
-        case 'revocar_dispositivo': {
-            const id = String(args?.id || '');
-            demoStore.dispositivos = demoStore.dispositivos.filter((d) => d.id !== id);
-            demoStore.persist();
-            return Promise.resolve(demoStore.dispositivos as unknown as T);
-        }
         case 'listar_respaldos':
             return Promise.resolve(demoStore.respaldos as unknown as T);
         case 'crear_respaldo': {
@@ -1722,8 +1686,6 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
         case 'restaurar_desde_respaldo':
         case 'restaurar_desde_archivo': {
             // Restaurar datos limpios: catálogo, inventario, categorías, cuentas y tasas
-            // IMPORTANTE: Las conexiones móviles y sesiones P2P quedan estrictamente purgadas (dispositivos = [])
-            demoStore.dispositivos = [];
             demoStore.persist();
             return Promise.resolve(true as unknown as T);
         }
@@ -2040,9 +2002,6 @@ export const api = {
     tasasImpuestos: () => invocar<TasaImpuesto[]>('listar_tasas_impuestos'),
     crearTasaImpuesto: (nombre: string, porcentaje: number) => invocar<TasaImpuesto[]>('crear_tasa_impuesto', { nombre, porcentaje }),
     eliminarTasaImpuesto: (id: string) => invocar<TasaImpuesto[]>('eliminar_tasa_impuesto', { id }),
-    dispositivos: () => invocar<DispositivoRemoto[]>('listar_dispositivos'),
-    registrarDispositivo: (nombre: string) => invocar<DispositivoRemoto[]>('registrar_dispositivo', { nombre }),
-    revocarDispositivo: (id: string) => invocar<DispositivoRemoto[]>('revocar_dispositivo', { id }),
     respaldos: () => invocar<RespaldoInfo[]>('listar_respaldos'),
     crearRespaldo: () => invocar<RespaldoInfo>('crear_respaldo'),
     restaurarRespaldo: (archivo?: string) => invocar<boolean>('restaurar_desde_respaldo', { archivo }),

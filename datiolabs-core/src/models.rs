@@ -619,15 +619,7 @@ pub struct Jornada {
     pub checksum_sha256: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct DispositivoRemoto {
-    pub id: String,
-    pub nombre: String,
-    pub ip: String,
-    pub ultimo_acceso: String,
-    pub activo: bool,
-}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SemaforoStock {

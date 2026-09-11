@@ -1,6 +1,6 @@
 use crate::capacidades::ErrorNegocio;
 use crate::models::{
-    Catalogo, Categoria, ConfigNegocio, DispositivoRemoto, EventoTasaBcv, Jornada,
+    Catalogo, Categoria, ConfigNegocio, EventoTasaBcv, Jornada,
     MetodoPagoConfig, MovimientoStock, Operador, Producto, SemaforoStock, TasaImpuesto, Venta,
 };
 use crate::modulos::panaderia::{LibroLotes, Lote};
@@ -32,7 +32,6 @@ const ARBOL_TASAS_IMPUESTOS: &str = "tasas_impuestos";
 const ARBOL_METODOS_PAGO: &str = "metodos_pago";
 const ARBOL_OPERADORES: &str = "operadores";
 const ARBOL_JORNADAS: &str = "jornadas";
-const ARBOL_DISPOSITIVOS: &str = "dispositivos";
 const ARBOL_SEMAFORO: &str = "semaforo_stock";
 const CLAVE_CONFIG: &[u8] = b"config";
 
@@ -49,7 +48,6 @@ const TODOS_ARBOLES: &[&str] = &[
     ARBOL_METODOS_PAGO,
     ARBOL_OPERADORES,
     ARBOL_JORNADAS,
-    ARBOL_DISPOSITIVOS,
     ARBOL_SEMAFORO,
 ];
 
@@ -313,29 +311,7 @@ impl Database {
         Ok(())
     }
 
-    // ---------------- dispositivos ----------------
 
-    pub fn listar_dispositivos(&self) -> Result<Vec<DispositivoRemoto>, DbError> {
-        let tree = self.db.open_tree(ARBOL_DISPOSITIVOS)?;
-        let mut devs = Vec::new();
-        for par in tree.iter() {
-            let (_, v) = par?;
-            devs.push(bincode::deserialize(&v)?);
-        }
-        Ok(devs)
-    }
-
-    pub fn guardar_dispositivo(&self, d: &DispositivoRemoto) -> Result<(), DbError> {
-        let tree = self.db.open_tree(ARBOL_DISPOSITIVOS)?;
-        tree.insert(d.id.as_bytes(), bincode::serialize(d)?)?;
-        Ok(())
-    }
-
-    pub fn eliminar_dispositivo(&self, id: &str) -> Result<(), DbError> {
-        let tree = self.db.open_tree(ARBOL_DISPOSITIVOS)?;
-        tree.remove(id.as_bytes())?;
-        Ok(())
-    }
 
     // ---------------- semaforo stock ----------------
 
