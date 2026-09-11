@@ -2859,27 +2859,27 @@ Esta tasa afectará todos los nuevos cobros y tickets a partir de este momento.`
             <div class="border-2 border-brand-black rounded-lg bg-amber-50 p-3.5 shadow-brutal-sm">
                 <span class="font-mono text-[10px] font-black text-amber-900 uppercase">MODULO 01</span>
                 <h4 class="font-heading font-black text-base mt-0.5">CAJA</h4>
-                <p class="text-xs text-gray-700 mt-1">Precio dual USD/Bs., semaforo de stock, pesable, paquetes, multi-operador, control de edad y cobro mixto con vuelto.</p>
+                <p class="text-xs text-gray-700 mt-1">Precio dual USD/Bs., semaforo dinámico, pesable, empaques, multi-operador, historial del turno, reactividad Enter y cobro multimoneda con vuelto exacto.</p>
             </div>
             <div class="border-2 border-brand-black rounded-lg bg-yellow-50 p-3.5 shadow-brutal-sm">
                 <span class="font-mono text-[10px] font-black text-yellow-900 uppercase">MODULO 02</span>
                 <h4 class="font-heading font-black text-base mt-0.5">CUENTAS</h4>
-                <p class="text-xs text-gray-700 mt-1">Cuentas activas (mesa/comanda) y deudas comerciales a credito, abonos con tasa dinamica y saldo a favor.</p>
+                <p class="text-xs text-gray-700 mt-1">Cuentas activas en mesa, conversion directa a deuda comercial, adicion/decremento fluido de consumos con retorno de existencias y abonos a tasa pactada.</p>
             </div>
             <div class="border-2 border-brand-black rounded-lg bg-blue-50 p-3.5 shadow-brutal-sm">
                 <span class="font-mono text-[10px] font-black text-blue-900 uppercase">MODULO 03</span>
                 <h4 class="font-heading font-black text-base mt-0.5">VENTAS</h4>
-                <p class="text-xs text-gray-700 mt-1">Historial de jornadas con KPIs, desglose por metodo de pago, badges de canal y exportacion CSV.</p>
+                <p class="text-xs text-gray-700 mt-1">Historial de jornadas con KPIs, desglose por metodo de pago, marcas cronologicas VET UTC-4 y exportacion CSV exhaustiva.</p>
             </div>
             <div class="border-2 border-brand-black rounded-lg bg-emerald-50 p-3.5 shadow-brutal-sm">
                 <span class="font-mono text-[10px] font-black text-emerald-900 uppercase">MODULO 04</span>
                 <h4 class="font-heading font-black text-base mt-0.5">INVENTARIO</h4>
-                <p class="text-xs text-gray-700 mt-1">Catalogo por categorias, calculadora de margen, empaque/caja, paquete, PIN protegido y modo privacidad.</p>
+                <p class="text-xs text-gray-700 mt-1">Catalogo por categorias, calculadora de margen, descuento atomico por empaque/caja, semaforo configurable y modo privacidad.</p>
             </div>
             <div class="border-2 border-brand-black rounded-lg bg-slate-100 p-3.5 shadow-brutal-sm">
                 <span class="font-mono text-[10px] font-black text-gray-800 uppercase">MODULO 05</span>
                 <h4 class="font-heading font-black text-base mt-0.5">PANEL</h4>
-                <p class="text-xs text-gray-700 mt-1">Diagnostico financiero por fechas, grafico SVG, semaforo de stock, respaldos criptograficos y PIN.</p>
+                <p class="text-xs text-gray-700 mt-1">Diagnostico financiero por fechas VET, grafico SVG determinista, semaforo de stock, respaldos criptograficos SHA-256 y PIN.</p>
             </div>
         </div>
 
@@ -2890,46 +2890,46 @@ Esta tasa afectará todos los nuevos cobros y tickets a partir de este momento.`
                 <div class="flex items-center gap-3 border-b-2 border-brand-black pb-3 mb-4">
                     <span class="w-8 h-8 rounded-full bg-brand-black text-white font-black font-heading flex items-center justify-center text-sm">1</span>
                     <div>
-                        <h3 class="font-heading font-black text-lg sm:text-xl">Modulo CAJA: Precio Dual, Semaforo, Pesable y Cobro Multimethod</h3>
-                        <p class="text-xs text-gray-500 font-bold">Facturacion directa con precios en USD y Bs., control de stock visual y vuelto exacto</p>
+                        <h3 class="font-heading font-black text-lg sm:text-xl">Modulo CAJA: Precio Dual, Historial del Turno y Cobro Reactivo</h3>
+                        <p class="text-xs text-gray-500 font-bold">Facturacion directa con precision decimal bancaria en USD y Bs., control de stock visual y auditoria en tiempo real</p>
                     </div>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs font-body leading-relaxed text-gray-700">
                     <div class="border border-brand-black rounded p-3 bg-amber-50">
                         <strong class="text-brand-black block font-heading font-black mb-1">Precio Dual USD / Bs.</strong>
-                        Cada producto muestra simultaneamente su precio en dolares (pequeno) y en bolivares con tasa BCV (grande, morado). El ticket tambien muestra ambos montos.
+                        Cada producto muestra simultaneamente su precio en dolares y en bolivares con tasa BCV. El ticket calcula totales con el modulo determinista de punto fijo Money.ts.
                     </div>
                     <div class="border border-brand-black rounded p-3 bg-red-50">
-                        <strong class="text-brand-black block font-heading font-black mb-1">Semaforo de Stock</strong>
-                        Indicador visual de salud del inventario: ROJO (stock critico), AMARILLO (stock bajo), VERDE (suficiente). Los umbrales son configurables desde el Panel del Dueno.
+                        <strong class="text-brand-black block font-heading font-black mb-1">Semaforo Dinamico de Stock</strong>
+                        Indicador visual de salud del inventario: ROJO (stock critico), AMARILLO (stock bajo), VERDE (suficiente). Los umbrales se sincronizan en tiempo real con la configuracion del negocio.
                     </div>
                     <div class="border border-brand-black rounded p-3 bg-blue-50">
                         <strong class="text-brand-black block font-heading font-black mb-1">Soporte Pesable (kg / ml)</strong>
-                        Productos vendidos por peso o volumen muestran input decimal en vez de botones +/-. Paso automatico de 0.05 para kg, 0.01 para ml.
+                        Productos vendidos por peso o volumen muestran input decimal en vez de botones +/-. Paso automatico fraccionario con proteccion contra desbordes.
                     </div>
                     <div class="border border-brand-black rounded p-3 bg-purple-50">
-                        <strong class="text-brand-black block font-heading font-black mb-1">Paquete y Caja Despiece</strong>
-                        Productos con precio por paquete muestran boton morado adicional. El stock se despieza visualmente en cajas y unidades sueltas (ej: "3 cajas + 5 un.").
+                        <strong class="text-brand-black block font-heading font-black mb-1">Empaque y Descuento Atomico</strong>
+                        Productos configurados en empaque (six-pack, bultos, cajas) descuentan exactamente la cantidad de unidades fisicas base correspondientes (K unidades x paquete) tanto en el carrito como en el libro mayor.
                     </div>
                     <div class="border border-brand-black rounded p-3 bg-emerald-50">
-                        <strong class="text-brand-black block font-heading font-black mb-1">Multi-Operador Simultaneo</strong>
-                        Multiples cajeros pueden trabajar en el mismo turno. El boton morado en el ticket muestra el operador activo y permite relevar o asignar cajeros sin cerrar turno.
+                        <strong class="text-brand-black block font-heading font-black mb-1">Historial del Turno Activo</strong>
+                        Boton "HISTORIAL" en cabecera: despliega modal brutalista con tickets y recaudacion acumulada exclusiva del turno activo desglosada por operador y metodo sin interrumpir la sesion.
                     </div>
                     <div class="border border-brand-black rounded p-3 bg-orange-50">
-                        <strong class="text-brand-black block font-heading font-black mb-1">Control de Edad</strong>
-                        Para productos restringidos (licoreria), el sistema solicita confirmacion de mayoria de edad antes de agregar al ticket.
+                        <strong class="text-brand-black block font-heading font-black mb-1">Multi-Operador y Relevo</strong>
+                        Multiples cajeros pueden operar en el mismo turno. El selector en la cabecera del ticket muestra el operador activo y permite registrar check-in y check-out de personal.
                     </div>
                     <div class="border border-brand-black rounded p-3 bg-gray-50">
-                        <strong class="text-brand-black block font-heading font-black mb-1">Cobro Multimethod con Vuelto</strong>
-                        Soporta multiples metodos de pago por venta (pago mixto). Cada metodo USD tiene tasa editable. El vuelto puede marcarse como PAGADO (entregado) o RETENIDO (saldo a favor).
+                        <strong class="text-brand-black block font-heading font-black mb-1">Reactividad Total y Tecla Enter</strong>
+                        El calculo de faltante y vuelto se recalcula en tiempo real al tipear (evento input) en montos y tasas. Presionar Enter en cualquier campo confirma la venta si el total esta cubierto.
+                    </div>
+                    <div class="border border-brand-black rounded p-3 bg-gray-50">
+                        <strong class="text-brand-black block font-heading font-black mb-1">Cobro Multimoneda con Vuelto</strong>
+                        Pagos mixtos en bolivares y divisas con tasas pactadas individuales. El excedente puede entregarse como vuelto fisico o retenerse como saldo a favor en cuenta.
                     </div>
                     <div class="border border-brand-black rounded p-3 bg-gray-50">
                         <strong class="text-brand-black block font-heading font-black mb-1">Borrador Persistente</strong>
-                        Si se cierra el modal de cobro sin confirmar, los pagos y resolucion de vuelto se guardan como borrador y se restauran al reabrir.
-                    </div>
-                    <div class="border border-brand-black rounded p-3 bg-gray-50">
-                        <strong class="text-brand-black block font-heading font-black mb-1">Creacion de Metodos de Pago</strong>
-                        Desde el modal de cobro se pueden crear nuevos metodos de pago (nombre + moneda USD o Bs.) y eliminar los existentes, sin salir de la pantalla de caja.
+                        Si se cierra el modal de cobro sin confirmar, los importes, metodos y resolucion de vuelto quedan retenidos en memoria y se restauran al volver a abrir.
                     </div>
                 </div>
             </div>
@@ -2939,34 +2939,34 @@ Esta tasa afectará todos los nuevos cobros y tickets a partir de este momento.`
                 <div class="flex items-center gap-3 border-b-2 border-brand-black pb-3 mb-4">
                     <span class="w-8 h-8 rounded-full bg-brand-black text-white font-black font-heading flex items-center justify-center text-sm">2</span>
                     <div>
-                        <h3 class="font-heading font-black text-lg sm:text-xl">Modulo CUENTAS: Activas en Local y Deudas Comerciales</h3>
-                        <p class="text-xs text-gray-500 font-bold">Comandas para mesas y credito a clientes con abonos a tasa libre y saldo a favor</p>
+                        <h3 class="font-heading font-black text-lg sm:text-xl">Modulo CUENTAS: Comandas en Local, Deudas y Conversion</h3>
+                        <p class="text-xs text-gray-500 font-bold">Comandas para mesas, cartera de credito comercial, conversion directa a deuda y ajuste fluido de consumos</p>
                     </div>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs font-body leading-relaxed text-gray-700">
                     <div class="border border-brand-black rounded p-3 bg-blue-50">
                         <strong class="text-brand-black block font-heading font-black mb-1">Dos Modalidades: Local vs. Deuda</strong>
-                        Cuentas Activas (mesas o barras, liquidadas a tasa del dia) y Deudas Abiertas (credito a clientes de confianza que permanecen abiertas por dias descontando stock al instante).
+                        Cuentas Activas (mesas o barras, liquidadas en la sesion) y Deudas Comerciales (credito a clientes de confianza que permanecen abiertas descontando existencias al instante).
                     </div>
                     <div class="border border-brand-black rounded p-3 bg-amber-50">
-                        <strong class="text-brand-black block font-heading font-black mb-1">Abonos con Tasa Dinamica</strong>
-                        Cada abono puede usar una tasa de cambio diferente (ej: USDT pactado a tasa superior a BCV). El sistema calcula automaticamente el aporte en Bs. y el saldo computable en USD.
+                        <strong class="text-brand-black block font-heading font-black mb-1">Boton Conversion a Deuda</strong>
+                        Boton "CONVERTIR A DEUDA": permite transferir una cuenta activa de mesa directamente al balance de deudas por cobrar asignando titular y plazo sin obligar a liquidar en caja.
                     </div>
                     <div class="border border-brand-black rounded p-3 bg-emerald-50">
-                        <strong class="text-brand-black block font-heading font-black mb-1">Saldo a Favor y Edicion</strong>
-                        Si el abono supera lo consumido, el saldo a favor se detecta automaticamente con badge verde. Los abonos pueden editarse (corregir monto en USD o Bs.) con preset "Poner en $0" o "Cubrir Todo".
+                        <strong class="text-brand-black block font-heading font-black mb-1">Ajuste Fluido de Consumos</strong>
+                        Controles interactivos [+] y [-] por cada linea de consumo. Permite incrementar o decrementar cantidades con devolucion o descuento automatico de stock fisico.
                     </div>
                     <div class="border border-brand-black rounded p-3 bg-purple-50">
-                        <strong class="text-brand-black block font-heading font-black mb-1">Liquidacion a Tasa Libre</strong>
-                        Las deudas no se atan al BCV historico: al cobrar, el dueno fija libremente la tasa o carga la oficial con un clic. El cobro final acepta pago mixto con vuelto.
+                        <strong class="text-brand-black block font-heading font-black mb-1">Liquidacion a Tasa Libre y Enter</strong>
+                        El comerciante fija la tasa libremente o carga la oficial con un clic. La liquidacion reacciona a cada pulsacion y confirma la transaccion al presionar Enter.
                     </div>
                     <div class="border border-brand-black rounded p-3 bg-red-50">
-                        <strong class="text-brand-black block font-heading font-black mb-1">Stock en Tiempo Real</strong>
-                        Agregar consumos descuenta existencias inmediatamente. Eliminar un consumo reintegra el stock automaticamente.
+                        <strong class="text-brand-black block font-heading font-black mb-1">Abonos Parciales y Saldo a Favor</strong>
+                        Abonos en multiples monedas con tasa individual. Si el abono sobrepasa la deuda, se genera automaticamente comprobante con saldo a favor retenido.
                     </div>
                     <div class="border border-brand-black rounded p-3 bg-gray-50">
-                        <strong class="text-brand-black block font-heading font-black mb-1">Filtros, Paginacion y Borrador</strong>
-                        Selector de pestanas (TODAS / ACTIVAS / DEUDAS), busqueda, paginacion a 15 por pagina y borrador de pagos persistente por cuenta.
+                        <strong class="text-brand-black block font-heading font-black mb-1">Historial del Turno en Cuentas</strong>
+                        Acceso directo al boton "HISTORIAL DEL TURNO" en la barra superior para auditar tickets cobrados y verificar balances de caja sin cambiar de modulo.
                     </div>
                 </div>
             </div>
