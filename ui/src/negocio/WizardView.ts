@@ -135,10 +135,7 @@ export class WizardView {
                 <div id="wz-sec-restaurar" class="${this.modo === 'restaurar' ? 'block' : 'hidden'} space-y-5">
                     <div class="bg-amber-50 border-2 border-brand-black rounded-lg p-4 text-xs font-bold text-amber-900 leading-relaxed">
                         <strong>Restauración Criptográfica de Datos:</strong>
-                        <ul class="list-disc pl-5 mt-1 space-y-1">
-                            <li>Restaura catálogo SoA, inventario atómico, categorías e impuestos.</li>
-                            <li><strong>Protocolo de Aislamiento:</strong> Dispositivos vinculados y sesiones remotas se purgan preventivamente al reinstalar.</li>
-                        </ul>
+                        <p class="mt-1">Restaura el catálogo SoA, inventario atómico, categorías, tasas tributarias e historial comercial con verificación de integridad SHA-256.</p>
                     </div>
 
                     <div>
