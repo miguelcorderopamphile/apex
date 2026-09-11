@@ -1028,6 +1028,31 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
             demoStore.persist();
             return Promise.resolve(undefined as unknown as T);
         }
+        case 'actualizar_producto': {
+            const input = args?.input as Record<string, unknown>;
+            const sku = String(input?.sku || '').toUpperCase();
+            const idx = demoStore.productos.findIndex((p) => p.sku === sku);
+            if (idx >= 0) {
+                const p = demoStore.productos[idx];
+                if (input?.nombre) p.nombre = String(input.nombre);
+                if (input?.precioUsd) p.precioUsd = String(input.precioUsd);
+                if (input?.impuestoPct) p.impuestoPct = String(input.impuestoPct);
+                if (input?.precioBrutoUsd !== undefined) p.precioBrutoUsd = String(input.precioBrutoUsd);
+                if (input?.margenPct !== undefined) p.margenPct = String(input.margenPct);
+                if (input?.categoriaId !== undefined) p.categoriaId = String(input.categoriaId);
+                if (input?.sinStock !== undefined) p.sinStock = Boolean(input.sinStock);
+                if (input?.unidad !== undefined) p.unidad = input.unidad as 'un' | 'kg' | 'ml';
+                if (input?.esCaja !== undefined) p.esCaja = Boolean(input.esCaja);
+                if (input?.unidadesPorCaja !== undefined) p.unidadesPorCaja = Number(input.unidadesPorCaja);
+                if (input?.precioPaqueteUsd !== undefined) p.precioPaqueteUsd = String(input.precioPaqueteUsd);
+                if (input?.nombrePaquete !== undefined) p.nombrePaquete = String(input.nombrePaquete);
+                if (Array.isArray(input?.presentaciones)) {
+                    p.presentaciones = input.presentaciones as { nombre: string; precioUsd: string; unidades: number }[];
+                }
+                demoStore.persist();
+            }
+            return Promise.resolve(undefined as unknown as T);
+        }
         case 'eliminar_producto': {
             const sku = String(args?.sku || '').toUpperCase();
             demoStore.productos = demoStore.productos.filter((p) => p.sku !== sku);
@@ -1976,6 +2001,16 @@ export const api = {
     }) => {
         const sku = p.sku && p.sku.trim() ? p.sku.trim().toUpperCase() : 'PROD-' + Math.random().toString(36).slice(2, 8).toUpperCase();
         return invocar<void>('crear_producto', { input: { ...p, sku } });
+    },
+    actualizarProducto: (p: {
+        sku: string; nombre: string; precioBrutoUsd?: string; margenPct?: string;
+        precioUsd: string; impuestoPct: string; stockInicial?: string;
+        pesable?: boolean; alcoholica?: boolean; categoriaId?: string; sinStock?: boolean;
+        unidad?: 'un' | 'kg' | 'ml'; esCaja?: boolean; unidadesPorCaja?: number;
+        precioPaqueteUsd?: string; nombrePaquete?: string;
+        presentaciones?: { nombre: string; precioUsd: string; unidades: number }[];
+    }) => {
+        return invocar<void>('actualizar_producto', { input: { ...p, stockInicial: p.stockInicial || '0', pesable: p.pesable ?? false } });
     },
     eliminarProducto: (sku: string) => invocar<void>('eliminar_producto', { sku }),
     registrarVenta: (

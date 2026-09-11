@@ -832,9 +832,12 @@ export class InventarioView {
                             <span class="text-[9px] font-black uppercase tracking-wider text-brand-purple bg-purple-50 border border-purple-200 rounded px-1.5 py-0.2 inline-block mb-0.5 truncate max-w-[150px]">${catNombre}</span>
                             <h4 class="font-heading font-black text-sm truncate" title="${p.nombre}">${p.nombre}</h4>
                         </div>
-                        <button data-repo-del="${p.sku}" title="Eliminar producto del catálogo" class="w-5 h-5 rounded border border-brand-black text-red-600 hover:bg-red-600 hover:text-white flex items-center justify-center font-black text-xs shrink-0">&times;</button>
+                        <div class="flex gap-1 shrink-0">
+                            <button data-repo-edit="${p.sku}" title="Editar precio y datos del producto" class="w-5 h-5 rounded border border-brand-black text-brand-black hover:bg-brand-black hover:text-white flex items-center justify-center font-black text-[10px] shrink-0">✎</button>
+                            <button data-repo-del="${p.sku}" title="Eliminar producto del catálogo" class="w-5 h-5 rounded border border-brand-black text-red-600 hover:bg-red-600 hover:text-white flex items-center justify-center font-black text-xs shrink-0">&times;</button>
+                        </div>
                     </div>
-                    <p class="text-xs font-bold text-gray-500 mt-0.5">${ocultarStock ? 'Stock: <span class="font-black text-gray-400">•••</span>' : `Precio: $${Number(p.precioUsd).toFixed(2)} · Stock: <span class="font-black ${colorStock}">${textoStock}</span>`}</p>
+                    <p class="text-xs font-bold text-gray-500 mt-0.5">${ocultarStock ? 'Stock: <span class="font-black text-gray-400">•••</span>' : `Precio: <span class="font-black text-brand-black">$${Number(p.precioUsd).toFixed(2)}</span> · Stock: <span class="font-black ${colorStock}">${textoStock}</span>`}</p>
                 </div>
                 ${p.sinStock ? '<p class="text-[11px] text-purple-700 font-bold mt-auto">Sin control de existencias físicas.</p>' : `
                 <div class="flex items-center gap-1 mt-auto pt-2 border-t border-gray-100">
@@ -876,6 +879,62 @@ export class InventarioView {
         // Sanitización de inputs de cantidad en reposición
         box.querySelectorAll<HTMLInputElement>('input[data-repo-cant]').forEach((inp) => {
             sanitizarInputDecimal(inp, 9999, 5);
+        });
+
+        box.querySelectorAll('[data-repo-edit]').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                const sku = (btn as HTMLElement).dataset.repoEdit;
+                const prod = this.productos.find((x) => x.sku === sku);
+                if (!sku || !prod) return;
+                const privacidad = this.modelo.getConfig()?.privacidadInventario;
+                if (privacidad && !this.duenoAutenticado) {
+                    mostrarToast('Acción no permitida en modo operador. Solicite al Dueño(a).', 'error');
+                    return;
+                }
+                if (!this.duenoAutenticado && this.modelo.hasPinSet()) {
+                    const pin = await pedirValor('Acción protegida. Ingrese el PIN de Administrador(a) / Dueño(a):', '', 'AUTENTICACIÓN DUEÑO(A)');
+                    if (!pin || !await this.modelo.verificarPin(pin)) {
+                        mostrarToast('PIN incorrecto o no suministrado. Acción cancelada.', 'error');
+                        return;
+                    }
+                }
+                const nuevoPrecioStr = await pedirValor(
+                    `Ingrese el nuevo precio neto de venta (USD) para "${prod.nombre}":`,
+                    Number(prod.precioUsd).toFixed(2),
+                    'ACTUALIZAR PRECIO DE VENTA'
+                );
+                if (!nuevoPrecioStr) return;
+                const nuevoPrecio = parseFloat(nuevoPrecioStr.replace(',', '.'));
+                if (isNaN(nuevoPrecio) || nuevoPrecio <= 0) {
+                    mostrarToast('Precio inválido. Debe ser un número mayor a cero.', 'error');
+                    return;
+                }
+                try {
+                    await api.actualizarProducto({
+                        sku: prod.sku,
+                        nombre: prod.nombre,
+                        precioUsd: nuevoPrecio.toFixed(2),
+                        impuestoPct: prod.impuestoPct,
+                        precioBrutoUsd: prod.precioBrutoUsd,
+                        margenPct: prod.margenPct,
+                        categoriaId: prod.categoriaId,
+                        sinStock: prod.sinStock,
+                        unidad: prod.unidad,
+                        esCaja: prod.esCaja,
+                        unidadesPorCaja: prod.unidadesPorCaja,
+                        precioPaqueteUsd: prod.precioPaqueteUsd,
+                        nombrePaquete: prod.nombrePaquete,
+                        presentaciones: prod.presentaciones,
+                    });
+                    const prods = await api.productos();
+                    this.productos = prods;
+                    this.renderRepoLista();
+                    this.renderCatalogoLista();
+                    mostrarToast(`Precio de "${prod.nombre}" actualizado a $${nuevoPrecio.toFixed(2)}.`, 'success');
+                } catch (e) {
+                    mostrarToast(e instanceof Error ? e.message : String(e), 'error');
+                }
+            });
         });
 
         box.querySelectorAll('[data-repo-del]').forEach((btn) => {

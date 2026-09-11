@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "DatioLabs Retail",
+  "productName": "DatioLabs",
   "version": "1.0.0",
   "identifier": "com.datiolabs.retail",
   "build": {
@@ -10,7 +10,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "DatioLabs Enterprise",
+        "title": "DatioLabs",
         "width": 1280,
         "height": 850,
         "minWidth": 1024,

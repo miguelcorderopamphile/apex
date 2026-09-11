@@ -4851,6 +4851,99 @@ fn cambiar_pin_dueno(
     Ok(true)
 }
 
+// ---------------- comandos: actualizar producto ----------------
+
+#[tauri::command]
+fn actualizar_producto(
+    estado: tauri::State<AppState>,
+    input: ProductoInput,
+) -> Result<(), UIError> {
+    config_requerida(&estado)?;
+    let sku_norm = input.sku.trim().to_uppercase();
+    let sku_obj = Sku::new(&sku_norm).map_err(|e| UIError::new("SKU invalido", e))?;
+    let db = estado
+        .ledger
+        .lock()
+        .map_err(|_| UIError::new("db bloqueada", ""))?;
+    let tree = db
+        .inner_db()
+        .open_tree("productos")
+        .map_err(|e| UIError::new("error db", &e.to_string()))?;
+
+    let raw = tree
+        .get(sku_obj.as_bytes())
+        .map_err(|e| UIError::new("error db", &e.to_string()))?
+        .ok_or_else(|| UIError::new("producto inexistente", "El SKU indicado no existe"))?;
+
+    let mut producto: Producto = bincode::deserialize(&raw)
+        .or_else(|_| serde_json::from_slice(&raw))
+        .map_err(|e| UIError::new("error deserializacion", &e.to_string()))?;
+
+    if !input.nombre.trim().is_empty() {
+        producto.nombre =
+            Nombre::new(input.nombre.trim()).map_err(|e| UIError::new("nombre invalido", e))?;
+    }
+    if let Ok(p) = decimal_de(&input.precio_usd) {
+        if p > Decimal::ZERO {
+            producto.precio_usd = p;
+        }
+    }
+    if let Ok(imp) = decimal_de(&input.impuesto_pct) {
+        producto.impuesto_pct = imp;
+    }
+    if let Some(ref pb) = input.precio_bruto_usd {
+        producto.precio_bruto_usd = decimal_de(pb).ok();
+    }
+    if let Some(ref mg) = input.margen_pct {
+        producto.margen_pct = decimal_de(mg).ok();
+    }
+    if let Some(cat) = input.categoria_id {
+        producto.categoria_id = if cat.trim().is_empty() {
+            None
+        } else {
+            Some(cat.trim().to_string())
+        };
+    }
+    if let Some(ss) = input.sin_stock {
+        producto.sin_stock = ss;
+    }
+    if let Some(ref un) = input.unidad {
+        producto.unidad = Some(un.clone());
+    }
+    if let Some(ec) = input.es_caja {
+        producto.es_caja = ec;
+    }
+    if input.unidades_por_caja.is_some() {
+        producto.unidades_por_caja = input.unidades_por_caja;
+    }
+    if let Some(ref pp) = input.precio_paquete_usd {
+        producto.precio_paquete_usd = decimal_de(pp).ok();
+    }
+    if let Some(ref np) = input.nombre_paquete {
+        producto.nombre_paquete = Some(np.clone());
+    }
+    if let Some(pres) = input.presentaciones {
+        producto.presentaciones = pres
+            .into_iter()
+            .filter_map(|p| {
+                decimal_de(&p.precio_usd).ok().map(|precio_usd| {
+                    datiolabs_core::models::Presentacion {
+                        nombre: p.nombre,
+                        precio_usd,
+                        unidades: p.unidades.max(1),
+                    }
+                })
+            })
+            .collect();
+    }
+
+    db.actualizar_producto(&producto)
+        .map_err(|e| UIError::new("error actualizando producto", &e.to_string()))?;
+    drop(db);
+    notificar_panel(&estado);
+    Ok(())
+}
+
 // ---------------- comandos: eliminar producto ----------------
 
 #[tauri::command]
@@ -5549,6 +5642,7 @@ pub fn run() {
             obtener_semaforo_stock,
             guardar_semaforo_stock,
             cambiar_pin_dueno,
+            actualizar_producto,
             eliminar_producto,
             reducir_stock,
             obtener_jornada_actual,
