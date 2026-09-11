@@ -1064,4 +1064,51 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn exportar_y_restaurar_backup_con_presentaciones() {
+        let db1 = db_temporal("bck_pres_1");
+        let dir = std::env::temp_dir().join(format!("datio_pres_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let backup_path = dir.join("datio_pres.backup");
+        let backup_path_str = backup_path.to_str().unwrap();
+
+        // Producto con presentaciones múltiples y despiece
+        let mut prod = Producto::nuevo_simple(
+            Sku::new("BEBIDA-PACK").unwrap(),
+            Nombre::new("Refresco 2L Pack 6").unwrap(),
+            dec!(3.50),
+            dec!(16),
+            dec!(48),
+            0,
+        );
+        prod.es_caja = true;
+        prod.unidades_por_caja = Some(6);
+        prod.precio_paquete_usd = Some(dec!(19.50));
+        prod.nombre_paquete = Some("Caja 6 un.".to_string());
+        prod.unidad = Some("un".to_string());
+        prod.precio_bruto_usd = Some(dec!(2.20));
+        prod.margen_pct = Some(dec!(35));
+
+        db1.guardar_producto(&prod).unwrap();
+
+        let meta_exp = db1.exportar_backup(backup_path_str).unwrap();
+        assert!(meta_exp.total_registros > 0);
+
+        let db2 = db_temporal("bck_pres_2");
+        let meta_imp = db2.importar_backup(backup_path_str).unwrap();
+        assert_eq!(meta_exp.checksum_sha256, meta_imp.checksum_sha256);
+
+        let cat = db2.cargar_catalogo().unwrap();
+        let idx = cat.indice_de("BEBIDA-PACK").expect("Producto recuperado en catálogo");
+        assert_eq!(cat.stock(idx), dec!(48));
+        assert!(cat.es_caja(idx));
+        assert_eq!(cat.unidades_por_caja(idx), Some(6));
+        assert_eq!(cat.precio_paquete_usd(idx), Some(dec!(19.50)));
+        assert_eq!(cat.nombre_paquete(idx), Some("Caja 6 un.".to_string()));
+        assert_eq!(cat.unidad(idx), Some("un".to_string()));
+        assert_eq!(cat.precio_bruto_usd(idx), Some(dec!(2.20)));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

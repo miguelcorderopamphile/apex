@@ -1719,7 +1719,8 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
             demoStore.persist();
             return Promise.resolve(resp as unknown as T);
         }
-        case 'restaurar_desde_respaldo': {
+        case 'restaurar_desde_respaldo':
+        case 'restaurar_desde_archivo': {
             // Restaurar datos limpios: catálogo, inventario, categorías, cuentas y tasas
             // IMPORTANTE: Las conexiones móviles y sesiones P2P quedan estrictamente purgadas (dispositivos = [])
             demoStore.dispositivos = [];

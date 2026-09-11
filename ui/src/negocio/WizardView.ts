@@ -366,6 +366,10 @@ export class WizardView {
 
             await api.restaurarDesdeArchivo(contenidoBase64, f.name);
 
+            if (this.bloquearPanel && pin) {
+                await api.cambiarPinDueno('', pin).catch(() => {});
+            }
+
             const cfg = await api.config();
             if (cfg) this.alTerminar(cfg);
             else throw new Error('Respaldo restaurado pero no se pudo cargar la configuración');
