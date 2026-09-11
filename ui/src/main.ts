@@ -292,8 +292,8 @@ class AppController {
         this.modalRoot.innerHTML = `
         <div class="fixed inset-0 bg-black/40 flex items-center justify-center z-[100] p-4">
             <div class="bg-white border-2 border-brand-black rounded-lg shadow-brutal p-8 w-full max-w-sm">
-                <h3 class="font-heading font-black text-2xl mb-1">ACCESO DEL DUENO</h3>
-                <p class="font-body text-brand-text mb-4">Ingresa la clave administrativa.</p>
+                <h3 class="font-heading font-black text-2xl mb-1">ACCESO DUEÑO(A)</h3>
+                <p class="font-body text-brand-text mb-4">Ingresa la clave de administración.</p>
                 <input id="pin-input" type="password" inputmode="numeric" maxlength="16" autofocus
                     class="w-full border-2 border-brand-black rounded px-4 py-3 text-2xl tracking-[0.5em] text-center mb-3" />
                 <p id="pin-error" class="hidden text-red-700 font-bold mb-2">Clave incorrecta.</p>

@@ -148,7 +148,7 @@ export class InventarioView {
 
         const conteo = this.getConteoCategorias();
 
-        const placeholderProducto = 'Ej: Artículo Comercial 1L, Presentación 500g, Pack Estándar...';
+        const placeholderProducto = 'Nombre comercial del producto o servicio...';
 
         const privacidad = this.modelo.getConfig()?.privacidadInventario;
         const ocultarStock = privacidad && !this.duenoAutenticado;
@@ -619,11 +619,11 @@ export class InventarioView {
                 if (!id) return;
                 const privacidad = this.modelo.getConfig()?.privacidadInventario;
                 if (privacidad && !this.duenoAutenticado) {
-                    mostrarToast('Acción no permitida en modo operador. Solicite al dueño.', 'error');
+                    mostrarToast('Acción no permitida en modo operador. Solicite al Dueño(a).', 'error');
                     return;
                 }
                 if (!this.duenoAutenticado && this.modelo.hasPinSet()) {
-                    const pin = await pedirValor('Acción protegida. Ingrese el PIN de Administrador / Dueño:', '', 'AUTENTICACIÓN DUEÑO');
+                    const pin = await pedirValor('Acción protegida. Ingrese el PIN de Administrador(a) / Dueño(a):', '', 'AUTENTICACIÓN DUEÑO(A)');
                     if (!pin || !await this.modelo.verificarPin(pin)) {
                         mostrarToast('PIN incorrecto o no suministrado. Acción cancelada.', 'error');
                         return;
@@ -838,11 +838,11 @@ export class InventarioView {
                 if (!sku || !prod) return;
                 const privacidad = this.modelo.getConfig()?.privacidadInventario;
                 if (privacidad && !this.duenoAutenticado) {
-                    mostrarToast('Acción no permitida en modo operador. Solicite al dueño.', 'error');
+                    mostrarToast('Acción no permitida en modo operador. Solicite al Dueño(a).', 'error');
                     return;
                 }
                 if (!this.duenoAutenticado && this.modelo.hasPinSet()) {
-                    const pin = await pedirValor('Acción protegida. Ingrese el PIN de Administrador / Dueño:', '', 'AUTENTICACIÓN DUEÑO');
+                    const pin = await pedirValor('Acción protegida. Ingrese el PIN de Administrador(a) / Dueño(a):', '', 'AUTENTICACIÓN DUEÑO(A)');
                     if (!pin || !await this.modelo.verificarPin(pin)) {
                         mostrarToast('PIN incorrecto o no suministrado. Acción cancelada.', 'error');
                         return;
@@ -871,11 +871,11 @@ export class InventarioView {
                 if (sku && cant && Number(cant) > 0 && Number(cant) <= 9999) {
                     const privacidad = this.modelo.getConfig()?.privacidadInventario;
                     if (privacidad && !this.duenoAutenticado) {
-                        mostrarToast('Acción no permitida en modo operador. Solicite al dueño.', 'error');
+                        mostrarToast('Acción no permitida en modo operador. Solicite al Dueño(a).', 'error');
                         return;
                     }
                     if (!this.duenoAutenticado && this.modelo.hasPinSet()) {
-                        const pin = await pedirValor('Acción de inventario protegida. Ingrese el PIN de Administrador / Dueño:', '', 'AUTENTICACIÓN DUEÑO');
+                        const pin = await pedirValor('Acción de inventario protegida. Ingrese el PIN de Administrador(a) / Dueño(a):', '', 'AUTENTICACIÓN DUEÑO(A)');
                         if (!pin || !await this.modelo.verificarPin(pin)) {
                             mostrarToast('PIN incorrecto o no suministrado. Operación cancelada.', 'error');
                             return;
@@ -907,11 +907,11 @@ export class InventarioView {
                 if (sku && cant && Number(cant) > 0 && Number(cant) <= 9999) {
                     const privacidad = this.modelo.getConfig()?.privacidadInventario;
                     if (privacidad && !this.duenoAutenticado) {
-                        mostrarToast('Acción no permitida en modo operador. Solicite al dueño.', 'error');
+                        mostrarToast('Acción no permitida en modo operador. Solicite al Dueño(a).', 'error');
                         return;
                     }
                     if (!this.duenoAutenticado && this.modelo.hasPinSet()) {
-                        const pin = await pedirValor('Acción de inventario protegida. Ingrese el PIN de Administrador / Dueño:', '', 'AUTENTICACIÓN DUEÑO');
+                        const pin = await pedirValor('Acción de inventario protegida. Ingrese el PIN de Administrador(a) / Dueño(a):', '', 'AUTENTICACIÓN DUEÑO(A)');
                         if (!pin || !await this.modelo.verificarPin(pin)) {
                             mostrarToast('PIN incorrecto o no suministrado. Operación cancelada.', 'error');
                             return;
@@ -943,11 +943,11 @@ export class InventarioView {
                 if (sku && cant && Number(cant) > 0 && Number(cant) <= 9999) {
                     const privacidad = this.modelo.getConfig()?.privacidadInventario;
                     if (privacidad && !this.duenoAutenticado) {
-                        mostrarToast('Acción no permitida en modo operador. Solicite al dueño.', 'error');
+                        mostrarToast('Acción no permitida en modo operador. Solicite al Dueño(a).', 'error');
                         return;
                     }
                     if (!this.duenoAutenticado && this.modelo.hasPinSet()) {
-                        const pin = await pedirValor('Acción de inventario protegida. Ingrese el PIN de Administrador / Dueño:', '', 'AUTENTICACIÓN DUEÑO');
+                        const pin = await pedirValor('Acción de inventario protegida. Ingrese el PIN de Administrador(a) / Dueño(a):', '', 'AUTENTICACIÓN DUEÑO(A)');
                         if (!pin || !await this.modelo.verificarPin(pin)) {
                             mostrarToast('PIN incorrecto o no suministrado. Operación cancelada.', 'error');
                             return;

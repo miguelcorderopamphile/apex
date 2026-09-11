@@ -292,8 +292,8 @@ export class PanelDuenoView {
         this.contenedor.innerHTML = `
         <div class="mb-4 sm:mb-6 flex flex-wrap items-center justify-between gap-3">
             <div>
-                <h2 class="text-2xl sm:text-3xl font-black font-heading">Panel del Dueño</h2>
-                <p class="text-brand-text font-body text-xs sm:text-sm">Auditoría contable, rentabilidad financiera, diagnóstico comercial y respaldos</p>
+                <h2 class="text-2xl sm:text-3xl font-black font-heading">Panel de Control Dueño(a)</h2>
+                <p class="text-brand-text font-body text-xs sm:text-sm">Auditoría contable, rentabilidad, márgenes y configuración de seguridad</p>
             </div>
             <div class="flex items-center gap-2 overflow-x-auto max-w-full pb-1">
                 <div class="inline-flex border-2 border-brand-black rounded bg-white shadow-brutal-sm p-0.5 shrink-0" id="rango-selector">

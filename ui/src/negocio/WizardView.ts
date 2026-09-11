@@ -68,7 +68,7 @@ export class WizardView {
                         <input id="wz-licencia" type="text" maxlength="20" placeholder="Ej: 0001-8888-1111-0000"
                             class="w-full border-2 border-brand-black rounded px-4 py-2 text-sm font-mono font-bold focus:outline-none focus:ring-2 focus:ring-brand-purple tracking-wider" />
                         <p id="wz-licencia-error" class="hidden text-red-700 font-bold text-xs">La clave no es válida para los rubros seleccionados.</p>
-                        <p class="text-[10px] text-gray-500 font-bold">Puedes omitir este paso y activar la licencia después desde el Panel del Dueño.</p>
+                        <p class="text-[10px] text-gray-500 font-bold">Puedes omitir este paso y activar la licencia después desde el Panel de Control Dueño(a).</p>
                     </div>
 
                     <!-- Elección de Privacidad de Inventario -->
@@ -79,7 +79,7 @@ export class WizardView {
                             <label class="cursor-pointer border-2 rounded p-3 bg-white flex items-start gap-2.5 border-brand-black ring-2 ring-brand-purple">
                                 <input type="radio" name="opt-priv-inv" id="priv-inv-dueno" checked class="mt-0.5" />
                                 <div>
-                                    <span class="block font-heading font-black text-xs">SOLO DUEÑO (RESTRINGIDO)</span>
+                                    <span class="block font-heading font-black text-xs">SOLO DUEÑO(A) (RESTRINGIDO)</span>
                                     <span class="text-[11px] text-gray-500 font-bold">Empleados ven si hay stock sin conocer el capital total ni costos de almacén.</span>
                                 </div>
                             </label>
@@ -95,14 +95,14 @@ export class WizardView {
 
                     <!-- Elección de Seguridad del Panel -->
                     <div class="border-2 border-brand-black rounded-lg p-4 bg-gray-50 space-y-3">
-                        <span class="block font-heading font-black text-xs uppercase text-brand-black">Seguridad y Privacidad del Panel del Dueño</span>
+                        <span class="block font-heading font-black text-xs uppercase text-brand-black">Seguridad y Privacidad del Panel de Control Dueño(a)</span>
                         <p class="text-xs text-gray-600 font-bold">¿Deseas que la sección PANEL quede bloqueada con clave para que los empleados no vean las ganancias ni costos?</p>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <label class="cursor-pointer border-2 rounded p-3 bg-white flex items-start gap-2.5 ${this.bloquearPanel ? 'border-brand-black ring-2 ring-brand-purple' : 'border-gray-300'}">
                                 <input type="radio" name="opt-seguridad" id="seg-bloqueado" ${this.bloquearPanel ? 'checked' : ''} class="mt-0.5" />
                                 <div>
                                     <span class="block font-heading font-black text-xs">BLOQUEAR CON CLAVE</span>
-                                    <span class="text-[11px] text-gray-500 font-bold">Solo el dueño ingresa con clave. Recomendado si tienes empleados.</span>
+                                    <span class="text-[11px] text-gray-500 font-bold">Solo Dueño(a) ingresa con clave. Recomendado si tienes empleados.</span>
                                 </div>
                             </label>
                             <label class="cursor-pointer border-2 rounded p-3 bg-white flex items-start gap-2.5 ${!this.bloquearPanel ? 'border-brand-black ring-2 ring-brand-purple' : 'border-gray-300'}">
@@ -115,7 +115,7 @@ export class WizardView {
                         </div>
 
                         <div id="wz-box-pin" class="${this.bloquearPanel ? 'block' : 'hidden'} pt-2">
-                            <label class="block font-heading font-bold text-xs uppercase tracking-wide mb-1">Define la Clave Maestra del Dueño *</label>
+                            <label class="block font-heading font-bold text-xs uppercase tracking-wide mb-1">Define la Clave Maestra de Dueño(a) *</label>
                             <input id="wz-pin" type="password" maxlength="16" placeholder="Ingresa tu clave maestra (ej: 1234)"
                                 class="w-full border-2 border-brand-black rounded px-4 py-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-brand-purple" />
                             <p class="text-[10px] text-gray-500 font-bold mt-1">Podrás cambiar esta clave en cualquier momento desde el propio Panel.</p>
@@ -178,7 +178,7 @@ export class WizardView {
                         </div>
 
                         <div id="wz-box-pin-res" class="${this.bloquearPanel ? 'block' : 'hidden'} pt-2">
-                            <label class="block font-heading font-bold text-xs uppercase tracking-wide mb-1">Clave del Dueño para este Terminal *</label>
+                            <label class="block font-heading font-bold text-xs uppercase tracking-wide mb-1">Clave de Dueño(a) para este Terminal *</label>
                             <input id="wz-pin-restaurar" type="password" maxlength="16" placeholder="Define la clave para este terminal"
                                 class="w-full border-2 border-brand-black rounded px-4 py-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-brand-purple" />
                         </div>

@@ -9,11 +9,11 @@ export class GuiaView {
         this.contenedor.innerHTML = `
         <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
             <div>
-                <h2 class="text-2xl sm:text-3xl font-black font-heading">Playbook Operativo ABC</h2>
-                <p class="text-brand-text font-body text-xs sm:text-sm">Manual de procedimientos comerciales, directrices de uso y lectura analitica de DatioLabs</p>
+                <h2 class="text-2xl sm:text-3xl font-black font-heading">Manual de Procedimientos y Operación Comercial</h2>
+                <p class="text-brand-text font-body text-xs sm:text-sm">Directrices de uso operativo, arqueo y lectura analítica de DatioLabs</p>
             </div>
             <span class="bg-brand-black text-white px-3 py-1.5 rounded font-black font-heading text-xs uppercase tracking-wider">
-                DOCUMENTACION OFICIAL
+                DOCUMENTACIÓN OFICIAL
             </span>
         </div>
 
@@ -22,27 +22,27 @@ export class GuiaView {
             <div class="border-2 border-brand-black rounded-lg bg-amber-50 p-3.5 shadow-brutal-sm">
                 <span class="font-mono text-[10px] font-black text-amber-900 uppercase">MODULO 01</span>
                 <h4 class="font-heading font-black text-base mt-0.5">CAJA</h4>
-                <p class="text-xs text-gray-700 mt-1">Precio dual USD/Bs., semaforo dinámico, pesable, empaques, multi-operador, historial del turno, reactividad Enter y cobro multimoneda con vuelto exacto.</p>
+                <p class="text-xs text-gray-700 mt-1">Precio dual USD/Bs., semáforo dinámico, pesable, empaques, multi-operador, historial del turno, reactividad Enter y cobro multimoneda con vuelto exacto.</p>
             </div>
             <div class="border-2 border-brand-black rounded-lg bg-yellow-50 p-3.5 shadow-brutal-sm">
                 <span class="font-mono text-[10px] font-black text-yellow-900 uppercase">MODULO 02</span>
                 <h4 class="font-heading font-black text-base mt-0.5">CUENTAS</h4>
-                <p class="text-xs text-gray-700 mt-1">Cuentas activas en mesa, conversion directa a deuda comercial, adicion/decremento fluido de consumos con retorno de existencias y abonos a tasa pactada.</p>
+                <p class="text-xs text-gray-700 mt-1">Cuentas activas en mesa, conversión directa a deuda comercial, adición/decremento fluido de consumos con retorno de existencias y abonos a tasa pactada.</p>
             </div>
             <div class="border-2 border-brand-black rounded-lg bg-blue-50 p-3.5 shadow-brutal-sm">
                 <span class="font-mono text-[10px] font-black text-blue-900 uppercase">MODULO 03</span>
                 <h4 class="font-heading font-black text-base mt-0.5">VENTAS</h4>
-                <p class="text-xs text-gray-700 mt-1">Historial de jornadas con KPIs, desglose por metodo de pago, marcas cronologicas VET UTC-4 y exportacion CSV exhaustiva.</p>
+                <p class="text-xs text-gray-700 mt-1">Historial de jornadas con KPIs, desglose por método de pago, marcas cronológicas VET UTC-4 y exportación CSV exhaustiva.</p>
             </div>
             <div class="border-2 border-brand-black rounded-lg bg-emerald-50 p-3.5 shadow-brutal-sm">
                 <span class="font-mono text-[10px] font-black text-emerald-900 uppercase">MODULO 04</span>
                 <h4 class="font-heading font-black text-base mt-0.5">INVENTARIO</h4>
-                <p class="text-xs text-gray-700 mt-1">Catalogo por categorias, calculadora de margen, descuento atomico por empaque/caja, semaforo configurable y modo privacidad.</p>
+                <p class="text-xs text-gray-700 mt-1">Catálogo por categorías, calculadora de margen, descuento atómico por empaque/caja, semáforo configurable y modo privacidad.</p>
             </div>
             <div class="border-2 border-brand-black rounded-lg bg-slate-100 p-3.5 shadow-brutal-sm">
                 <span class="font-mono text-[10px] font-black text-gray-800 uppercase">MODULO 05</span>
                 <h4 class="font-heading font-black text-base mt-0.5">PANEL</h4>
-                <p class="text-xs text-gray-700 mt-1">Diagnostico financiero por fechas VET, grafico SVG determinista, semaforo de stock, respaldos criptograficos SHA-256 y PIN.</p>
+                <p class="text-xs text-gray-700 mt-1">Diagnóstico financiero por fechas VET, gráfico SVG determinista, semáforo de stock, respaldos criptográficos SHA-256 y control Dueño(a).</p>
             </div>
         </div>
 
@@ -199,7 +199,7 @@ export class GuiaView {
                     </div>
                     <div class="border border-brand-black rounded p-3 bg-red-50">
                         <strong class="text-brand-black block font-heading font-black mb-1">PIN Protegido y Modo Privacidad</strong>
-                        Operadores requieren PIN para eliminar productos, entradas, reducciones y mermas. El dueno puede ocultar precios y stock a los operadores desde la configuracion.
+                        Operadores requieren PIN para eliminar productos, entradas, reducciones y mermas. Dueño(a) puede ocultar precios y stock a los operadores desde la configuración.
                     </div>
                     <div class="border border-brand-black rounded p-3 bg-gray-50">
                         <strong class="text-brand-black block font-heading font-black mb-1">Movimientos de Stock</strong>
@@ -220,13 +220,13 @@ export class GuiaView {
                 </div>
             </div>
 
-            <!-- ============ MODULO 5: PANEL DEL DUENO ============ -->
+            <!-- ============ MODULO 5: PANEL DE CONTROL DUEÑO(A) ============ -->
             <div class="bg-white border-2 border-brand-black rounded-lg shadow-brutal p-6">
                 <div class="flex items-center gap-3 border-b-2 border-brand-black pb-3 mb-4">
                     <span class="w-8 h-8 rounded-full bg-brand-black text-white font-black font-heading flex items-center justify-center text-sm">5</span>
                     <div>
-                        <h3 class="font-heading font-black text-lg sm:text-xl">Modulo PANEL: Diagnostico Financiero y Configuracion</h3>
-                        <p class="text-xs text-gray-500 font-bold">KPIs por rango de fechas, grafico SVG, semaforo, respaldos y administracion completa</p>
+                        <h3 class="font-heading font-black text-lg sm:text-xl">Módulo PANEL: Diagnóstico Financiero y Control Dueño(a)</h3>
+                        <p class="text-xs text-gray-500 font-bold">KPIs por rango de fechas, gráfico SVG, semáforo, respaldos y administración con clave</p>
                     </div>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs font-body leading-relaxed text-gray-700">
@@ -281,15 +281,15 @@ export class GuiaView {
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs font-body leading-relaxed text-gray-700">
                     <div class="border border-brand-black rounded p-3 bg-gray-50">
                         <strong class="text-brand-black block font-heading font-black mb-1">Apertura Directa sin Clave</strong>
-                        Si no hay turno activo, el boton de operador en Caja muestra "SIN TURNO ACTIVO". El operador selecciona los cajeros del dia y abre el turno sin requerir clave de dueno.
+                        Si no hay turno activo, el botón de operador en Caja muestra "SIN TURNO ACTIVO". El operador selecciona los cajeros del día y abre el turno sin requerir clave de Dueño(a).
                     </div>
                     <div class="border border-brand-black rounded p-3 bg-gray-50">
-                        <strong class="text-brand-black block font-heading font-black mb-1">Relevo y Asignacion en Vivo</strong>
-                        Desde Caja o Panel se pueden agregar, editar y relevar cajeros simultaneos. Los cambios se propagan inmediatamente al turno activo sin interrumpir ventas.
+                        <strong class="text-brand-black block font-heading font-black mb-1">Relevo y Asignación en Vivo</strong>
+                        Desde Caja o Panel se pueden agregar, editar y relevar cajeros simultáneos. Los cambios se propagan inmediatamente al turno activo sin interrumpir ventas.
                     </div>
                     <div class="border border-brand-black rounded p-3 bg-gray-50">
                         <strong class="text-brand-black block font-heading font-black mb-1">Cierre desde Panel</strong>
-                        Solo el dueno puede cerrar la jornada desde el Panel. El cierre consolida totales, genera SHA-256 de verificacion y bloquea ediciones posteriores.
+                        Solo Dueño(a) puede cerrar la jornada desde el Panel. El cierre consolida totales, genera SHA-256 de verificación y bloquea ediciones posteriores.
                     </div>
                     <div class="border border-brand-black rounded p-3 bg-gray-50">
                         <strong class="text-brand-black block font-heading font-black mb-1">Paginacion y Rendimiento</strong>

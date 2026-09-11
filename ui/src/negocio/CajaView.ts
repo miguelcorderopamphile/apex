@@ -45,7 +45,7 @@ export class CajaView {
         <div class="flex flex-col lg:grid lg:grid-cols-3 gap-4 sm:gap-6">
             <div class="lg:col-span-2 order-2 lg:order-1">
                 <input id="caja-buscar" type="text" autocomplete="off" maxlength="40"
-                    placeholder="Escribe el nombre del producto para agregarlo al ticket..."
+                    placeholder="Buscar producto o código..."
                     class="w-full border-2 border-brand-black rounded px-4 py-3 sm:px-5 sm:py-4 text-base sm:text-xl font-body font-bold mb-3 sm:mb-4 focus:outline-none focus:ring-2 sm:focus:ring-4 focus:ring-brand-cyan/50" />
                 <div id="caja-grid" class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-4"></div>
             </div>
@@ -565,7 +565,7 @@ export class CajaView {
                     <div class="bg-white border border-gray-300 rounded p-2 text-xs text-gray-700">
                         <p class="font-bold text-emerald-900 mb-0.5">Vuelto Retenido como Saldo a Favor</p>
                         <p class="text-[11px] text-gray-600 leading-tight">
-                            El excedente de <b>Bs. ${fmt(tActual.vueltoBs)} ($ ${fmt(tActual.vueltoUsd)})</b> no genera egreso físico de caja y se asienta en el comprobante como saldo a favor o ganancia por excedente del negocio.
+                            Excedente de <b>Bs. ${fmt(tActual.vueltoBs)} ($ ${fmt(tActual.vueltoUsd)})</b> asentado a favor sin egreso de efectivo.
                         </p>
                     </div>
                     `}

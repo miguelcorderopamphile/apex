@@ -166,7 +166,7 @@ export class CuentasView {
         <div class="mb-4 sm:mb-6 flex flex-wrap items-center justify-between gap-3">
             <div>
                 <h2 class="text-2xl sm:text-3xl font-black font-heading">${esLicoreria ? 'Cuentas Abiertas y Deudas' : 'Deudas Comerciales a Clientes'}</h2>
-                <p class="text-brand-text font-body text-xs sm:text-sm">${esLicoreria ? 'Control de comandas activas en local y deudas comerciales a crédito con liquidación a tasa libre' : 'Gestión de crédito comercial a clientes de confianza con liquidación a tasa libre'}</p>
+                <p class="text-brand-text font-body text-xs sm:text-sm">${esLicoreria ? 'Comandas en local y crédito comercial con liquidación a tasa libre' : 'Crédito comercial y cuentas por cobrar (tasa libre)'}</p>
             </div>
             <div class="flex items-center gap-2">
                 <button id="btn-historial-turno-cuentas" class="bg-gray-100 hover:bg-gray-200 text-brand-black px-3 sm:px-4 py-2 sm:py-2.5 rounded font-heading font-black text-xs sm:text-sm border-2 border-brand-black shadow-brutal hover:-translate-y-0.5 transition-all flex items-center gap-1.5">
@@ -745,23 +745,23 @@ export class CuentasView {
                     </div>
 
                     <h3 class="font-heading font-black text-2xl mb-1">${esDeuda ? "REGISTRAR NUEVA DEUDA" : "ABRIR CUENTA EN LOCAL"}</h3>
-                    <p class="text-xs text-gray-600 mb-4 font-bold leading-relaxed">
+                    <p class="text-xs text-gray-600 mb-4">
                         ${esDeuda
-                            ? "Abre un registro de deuda a nombre de un cliente. Los consumos descontarán stock de inmediato. Esta cuenta puede permanecer abierta por días y se cobrará a la tasa libre que usted defina al momento del pago."
+                            ? "Registro de crédito comercial. Descuenta stock al instante y liquida a tasa libre al cobrar."
                             : "Identificador para consumos de comanda, mesa o servicio en barra."}
                     </p>
 
                     <div class="space-y-3 mb-4">
                         <div>
                             <label class="block text-xs font-bold uppercase mb-1">${esDeuda ? "Nombre del Cliente / Deudor" : "Identificador (Mesa / Barra / Cliente)"}</label>
-                            <input id="modal-cta-nombre" maxlength="40" autofocus placeholder="${esDeuda ? "Ej: Taller Hermanos Gómez / Carlos" : "Ej: Mesa 4 / Terraza"}"
+                            <input id="modal-cta-nombre" maxlength="40" autofocus placeholder="${esDeuda ? "Ej: Taller Gómez / Carlos" : "Ej: Mesa 4 / Terraza"}"
                                 class="w-full border-2 border-brand-black rounded px-3 py-2 text-base font-body focus:ring-2 focus:ring-brand-cyan" />
                         </div>
 
                         ${esDeuda ? `
                         <div>
                             <label class="block text-xs font-bold uppercase mb-1">Nota de Compromiso / Plazo (Opcional)</label>
-                            <input id="modal-cta-nota" maxlength="60" placeholder="Ej: Paga el viernes / Autorizado por dueño"
+                            <input id="modal-cta-nota" maxlength="60" placeholder="Ej: Paga el viernes / Autorizado por Dueño(a)"
                                 class="w-full border-2 border-brand-black rounded px-3 py-2 text-sm font-body focus:ring-2 focus:ring-brand-cyan" />
                         </div>
                         ` : ""}

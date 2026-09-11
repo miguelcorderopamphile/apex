@@ -167,7 +167,7 @@ export class VentasView {
         <div class="mb-4 sm:mb-6 flex flex-wrap items-center justify-between gap-3">
             <div>
                 <h2 class="text-2xl sm:text-3xl font-black font-heading">Historial de Jornadas</h2>
-                <p class="text-brand-text font-body text-xs sm:text-sm">Registro de turnos operativos, balance consolidado y exportacion por jornada</p>
+                <p class="text-brand-text font-body text-xs sm:text-sm">Turnos operativos, arqueo de ventas y exportación de jornadas</p>
             </div>
             <span class="text-xs font-bold text-gray-700 bg-white border-2 border-brand-black px-3 py-1.5 rounded shadow-brutal-sm">
                 ${totalJornadas} Jornada${totalJornadas !== 1 ? 's' : ''}
