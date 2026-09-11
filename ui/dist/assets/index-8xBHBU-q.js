@@ -86,7 +86,7 @@ Esta tasa afectará todos los nuevos cobros y tickets a partir de este momento.`
                     </div>
 
                     <div>
-                        <p class="font-heading font-bold text-xs uppercase tracking-wide mb-2">Rubros comerciales que opera:</p>
+                        <p class="font-heading font-bold text-xs uppercase tracking-wide mb-2">Rubros comerciales activos:</p>
                         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
                             ${this.tarjetaRubro("wz-abasto","Abasto","Comestibles y peso",Ce,"bg-brand-cyan")}
                             ${this.tarjetaRubro("wz-panaderia","Panadería","Horneados FEFO",Le,"bg-brand-yellow")}
@@ -98,30 +98,30 @@ Esta tasa afectará todos los nuevos cobros y tickets a partir de este momento.`
                     <!-- Clave de Licencia Comercial -->
                     <div class="border-2 border-brand-black rounded-lg p-4 bg-gray-50 space-y-3">
                         <span class="block font-heading font-black text-xs uppercase text-brand-black">Clave de Licencia Comercial</span>
-                        <p class="text-xs text-gray-600 font-bold">Ingresa la clave de activación de 16 dígitos proporcionada por DatioLabs. Sin ella, el sistema arranca en modo demo.</p>
+                        <p class="text-xs text-gray-600 font-bold">Clave de activación de 16 dígitos DatioLabs. Sin clave, opera en modo demostración.</p>
                         <input id="wz-licencia" type="text" maxlength="20" placeholder="Ej: 0001-8888-1111-0000"
                             class="w-full border-2 border-brand-black rounded px-4 py-2 text-sm font-mono font-bold focus:outline-none focus:ring-2 focus:ring-brand-purple tracking-wider" />
-                        <p id="wz-licencia-error" class="hidden text-red-700 font-bold text-xs">La clave no es válida para los rubros seleccionados.</p>
-                        <p class="text-[10px] text-gray-500 font-bold">Puedes omitir este paso y activar la licencia después desde el Panel de Control Dueño(a).</p>
+                        <p id="wz-licencia-error" class="hidden text-red-700 font-bold text-xs">Clave no válida para los rubros seleccionados.</p>
+                        <p class="text-[10px] text-gray-500 font-bold">Puede omitir este paso y activar la licencia posteriormente desde el Panel de Control Dueño(a).</p>
                     </div>
 
                     <!-- Elección de Privacidad de Inventario -->
                     <div class="border-2 border-brand-black rounded-lg p-4 bg-gray-50 space-y-3">
                         <span class="block font-heading font-black text-xs uppercase text-brand-black">Privacidad de Inventario y Stock</span>
-                        <p class="text-xs text-gray-600 font-bold">Controla si los operadores y empleados pueden ver el valor del inventario o solo la disponibilidad en tienda:</p>
+                        <p class="text-xs text-gray-600 font-bold">Nivel de visibilidad de costos y valoración para operadores:</p>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <label class="cursor-pointer border-2 rounded p-3 bg-white flex items-start gap-2.5 border-brand-black ring-2 ring-brand-purple">
                                 <input type="radio" name="opt-priv-inv" id="priv-inv-dueno" checked class="mt-0.5" />
                                 <div>
                                     <span class="block font-heading font-black text-xs">SOLO DUEÑO(A) (RESTRINGIDO)</span>
-                                    <span class="text-[11px] text-gray-500 font-bold">Empleados ven si hay stock sin conocer el capital total ni costos de almacén.</span>
+                                    <span class="text-[11px] text-gray-500 font-bold">Operadores visualizan disponibilidad física sin costos ni valoración global.</span>
                                 </div>
                             </label>
                             <label class="cursor-pointer border-2 rounded p-3 bg-white flex items-start gap-2.5 border-gray-300">
                                 <input type="radio" name="opt-priv-inv" id="priv-inv-abierto" class="mt-0.5" />
                                 <div>
                                     <span class="block font-heading font-black text-xs">VISIBILIDAD TOTAL</span>
-                                    <span class="text-[11px] text-gray-500 font-bold">Todos los operadores tienen acceso al conteo y valor monetario del inventario.</span>
+                                    <span class="text-[11px] text-gray-500 font-bold">Acceso a conteos, costos unitarios y balance total de inventario.</span>
                                 </div>
                             </label>
                         </div>
@@ -129,30 +129,30 @@ Esta tasa afectará todos los nuevos cobros y tickets a partir de este momento.`
 
                     <!-- Elección de Seguridad del Panel -->
                     <div class="border-2 border-brand-black rounded-lg p-4 bg-gray-50 space-y-3">
-                        <span class="block font-heading font-black text-xs uppercase text-brand-black">Seguridad y Privacidad del Panel de Control Dueño(a)</span>
-                        <p class="text-xs text-gray-600 font-bold">¿Deseas que la sección PANEL quede bloqueada con clave para que los empleados no vean las ganancias ni costos?</p>
+                        <span class="block font-heading font-black text-xs uppercase text-brand-black">Seguridad del Panel de Control Dueño(a)</span>
+                        <p class="text-xs text-gray-600 font-bold">Restricción de acceso a métricas contables, arqueos y configuración:</p>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <label class="cursor-pointer border-2 rounded p-3 bg-white flex items-start gap-2.5 ${this.bloquearPanel?"border-brand-black ring-2 ring-brand-purple":"border-gray-300"}">
                                 <input type="radio" name="opt-seguridad" id="seg-bloqueado" ${this.bloquearPanel?"checked":""} class="mt-0.5" />
                                 <div>
                                     <span class="block font-heading font-black text-xs">BLOQUEAR CON CLAVE</span>
-                                    <span class="text-[11px] text-gray-500 font-bold">Solo Dueño(a) ingresa con clave. Recomendado si tienes empleados.</span>
+                                    <span class="text-[11px] text-gray-500 font-bold">Acceso exclusivo mediante clave de Dueño(a).</span>
                                 </div>
                             </label>
                             <label class="cursor-pointer border-2 rounded p-3 bg-white flex items-start gap-2.5 ${this.bloquearPanel?"border-gray-300":"border-brand-black ring-2 ring-brand-purple"}">
                                 <input type="radio" name="opt-seguridad" id="seg-abierto" ${this.bloquearPanel?"":"checked"} class="mt-0.5" />
                                 <div>
                                     <span class="block font-heading font-black text-xs">DEJAR ABIERTO</span>
-                                    <span class="text-[11px] text-gray-500 font-bold">Acceso directo sin clave. Útil si solo tú atiendes la caja.</span>
+                                    <span class="text-[11px] text-gray-500 font-bold">Acceso directo sin clave en este terminal.</span>
                                 </div>
                             </label>
                         </div>
 
                         <div id="wz-box-pin" class="${this.bloquearPanel?"block":"hidden"} pt-2">
                             <label class="block font-heading font-bold text-xs uppercase tracking-wide mb-1">Define la Clave Maestra de Dueño(a) *</label>
-                            <input id="wz-pin" type="password" maxlength="16" placeholder="Ingresa tu clave maestra (ej: 1234)"
+                            <input id="wz-pin" type="password" maxlength="16" placeholder="Ingresa clave numérica (ej: 1234)"
                                 class="w-full border-2 border-brand-black rounded px-4 py-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-brand-purple" />
-                            <p class="text-[10px] text-gray-500 font-bold mt-1">Podrás cambiar esta clave en cualquier momento desde el propio Panel.</p>
+                            <p class="text-[10px] text-gray-500 font-bold mt-1">Configurable posteriormente desde el Panel de Control Dueño(a).</p>
                         </div>
                     </div>
 
@@ -161,17 +161,17 @@ Esta tasa afectará todos los nuevos cobros y tickets a partir de este momento.`
                     <div id="wz-error" class="hidden bg-red-100 border-2 border-red-600 text-red-800 rounded px-4 py-3 font-bold text-sm"></div>
 
                     <button id="wz-iniciar" class="w-full bg-brand-black text-white font-heading font-black text-lg py-3.5 rounded border-2 border-brand-black shadow-brutal hover:-translate-y-0.5 transition-transform">
-                        INICIAR NEGOCIO LOCAL
+                        INICIALIZAR TERMINAL
                     </button>
                 </div>
 
                 <!-- Modo 2: Instalar desde Respaldo Criptográfico -->
                 <div id="wz-sec-restaurar" class="${this.modo==="restaurar"?"block":"hidden"} space-y-5">
                     <div class="bg-amber-50 border-2 border-brand-black rounded-lg p-4 text-xs font-bold text-amber-900 leading-relaxed">
-                        <strong>Restauración Segura de Datos:</strong>
+                        <strong>Restauración Criptográfica de Datos:</strong>
                         <ul class="list-disc pl-5 mt-1 space-y-1">
-                            <li>Restaura el catálogo de productos, existencias de inventario, categorías y tasas tributarias.</li>
-                            <li><strong>Regla de Seguridad:</strong> Las conexiones móviles anteriores y sesiones P2P quedan <u>estrictamente purgadas</u> para prevenir accesos no autorizados al cambiar de máquina o reinstalar.</li>
+                            <li>Restaura catálogo SoA, inventario atómico, categorías e impuestos.</li>
+                            <li><strong>Protocolo de Aislamiento:</strong> Dispositivos vinculados y sesiones remotas se purgan preventivamente al reinstalar.</li>
                         </ul>
                     </div>
 
