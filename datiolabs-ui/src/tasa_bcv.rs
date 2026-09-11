@@ -415,6 +415,7 @@ mod tests {
         let original = CacheTasa {
             valor: dec!(36.92),
             fecha_unix: 1_700_000_001,
+            fuente: "BCV".to_string(),
         };
         guardar_cache(&ruta, &original);
         let leido = cargar_cache(&ruta);

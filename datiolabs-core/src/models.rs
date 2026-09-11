@@ -179,6 +179,28 @@ pub struct Producto {
     pub nombre_paquete: Option<String>,
 }
 
+impl Producto {
+    pub fn nuevo_simple(sku: Sku, nombre: Nombre, precio_usd: Decimal, impuesto_pct: Decimal, stock: Decimal, capacidades: u16) -> Self {
+        Self {
+            sku,
+            nombre,
+            precio_usd,
+            impuesto_pct,
+            stock,
+            capacidades,
+            categoria_id: None,
+            precio_bruto_usd: None,
+            margen_pct: None,
+            sin_stock: false,
+            unidad: None,
+            es_caja: false,
+            unidades_por_caja: None,
+            precio_paquete_usd: None,
+            nombre_paquete: None,
+        }
+    }
+}
+
 /// Struct-of-Arrays catalog: column-contiguous layout saturating cache lines
 /// during grid scans (price refresh, stock sweeps). No per-row indirection.
 #[derive(Debug, Clone, Default)]
@@ -506,6 +528,20 @@ pub struct ConfigNegocio {
     pub licencia_estado: String,
     #[serde(default)]
     pub privacidad_inventario: bool,
+}
+
+impl ConfigNegocio {
+    pub fn nuevo_simple(nombre: Nombre, rubros: u16, pin_dueno_sha256: String) -> Self {
+        Self {
+            nombre,
+            rubros,
+            pin_dueno_sha256,
+            licencia_clave: String::new(),
+            licencia_titular: String::new(),
+            licencia_estado: String::new(),
+            privacidad_inventario: false,
+        }
+    }
 }
 
 // ---------------- modelos nuevos para gestion ----------------

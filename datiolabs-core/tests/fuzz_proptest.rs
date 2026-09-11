@@ -121,18 +121,18 @@ proptest! {
 
         let db = Database::abrir(dir.to_str().unwrap()).unwrap();
 
-        let config = ConfigNegocio {
-            nombre: Nombre::new("Test").unwrap(),
+        let config = ConfigNegocio::nuevo_simple(
+            Nombre::new("Test").unwrap(),
             rubros,
-            pin_dueno_sha256: "pin123".into(),
-        };
+            "pin123".into(),
+        );
         prop_assert!(db.guardar_config(&config).is_ok());
 
-        let config2 = ConfigNegocio {
-            nombre: Nombre::new("Test2").unwrap(),
-            rubros: RUBRO_ABASTO,
-            pin_dueno_sha256: "pin456".into(),
-        };
+        let config2 = ConfigNegocio::nuevo_simple(
+            Nombre::new("Test2").unwrap(),
+            RUBRO_ABASTO,
+            "pin456".into(),
+        );
         prop_assert!(matches!(
             db.guardar_config(&config2),
             Err(datiolabs_core::db::DbError::Negocio(ErrorNegocio::YaInicializado))
@@ -159,11 +159,11 @@ proptest! {
         let _ = std::fs::remove_dir_all(&dir);
 
         let db = Database::abrir(dir.to_str().unwrap()).unwrap();
-        let _ = db.guardar_config(&ConfigNegocio {
-            nombre: Nombre::new("Test").unwrap(),
+        let _ = db.guardar_config(&ConfigNegocio::nuevo_simple(
+            Nombre::new("Test").unwrap(),
             rubros,
-            pin_dueno_sha256: "".into(),
-        });
+            "".into(),
+        ));
 
         let caps = capacidades_de_rubros(rubros);
         let mut inserted = HashSet::new();
@@ -171,24 +171,24 @@ proptest! {
         for ((sku_str, precio), stock) in skus.iter().zip(precios.iter()).zip(stocks.iter()) {
             if inserted.insert(sku_str.clone()) {
                 let sku = Sku::new(sku_str).unwrap();
-                let prod = Producto {
+                let prod = Producto::nuevo_simple(
                     sku,
-                    nombre: Nombre::new("Test").unwrap(),
-                    precio_usd: *precio,
-                    impuesto_pct: dec!(16),
-                    stock: (*stock).max(Decimal::ZERO),
-                    capacidades: caps,
-                };
+                    Nombre::new("Test").unwrap(),
+                    *precio,
+                    dec!(16),
+                    (*stock).max(Decimal::ZERO),
+                    caps,
+                );
                 prop_assert!(db.guardar_producto(&prod).is_ok());
             } else {
-                let prod = Producto {
-                    sku: Sku::new(sku_str).unwrap(),
-                    nombre: Nombre::new("Test").unwrap(),
-                    precio_usd: *precio,
-                    impuesto_pct: dec!(16),
-                    stock: Decimal::ZERO,
-                    capacidades: caps,
-                };
+                let prod = Producto::nuevo_simple(
+                    Sku::new(sku_str).unwrap(),
+                    Nombre::new("Test").unwrap(),
+                    *precio,
+                    dec!(16),
+                    Decimal::ZERO,
+                    caps,
+                );
                 prop_assert!(matches!(
                     db.guardar_producto(&prod),
                     Err(datiolabs_core::db::DbError::Negocio(ErrorNegocio::SkuDuplicado(_)))
@@ -223,7 +223,7 @@ proptest! {
 
             let reloaded = db.cargar_catalogo().unwrap();
             let new_stock = reloaded.stock(reloaded.indice_de(sku).unwrap());
-            prop_assert_eq!(new_stock, initial_stock - dec!(1));
+            prop_assert_eq!(new_stock, (initial_stock - dec!(1)).max(Decimal::ZERO));
             prop_assert_eq!(cat.stock(idx), new_stock);
         }
 
@@ -249,22 +249,22 @@ proptest! {
         let db = Database::abrir(dir.to_str().unwrap()).unwrap();
         let caps = capacidades_de_rubros(rubros);
 
-        let _ = db.guardar_config(&ConfigNegocio {
-            nombre: Nombre::new("Test").unwrap(),
+        let _ = db.guardar_config(&ConfigNegocio::nuevo_simple(
+            Nombre::new("Test").unwrap(),
             rubros,
-            pin_dueno_sha256: "".into(),
-        });
+            "".into(),
+        ));
 
         let sku_str = "PANTEST";
         let sku = Sku::new(sku_str).unwrap();
-        let prod = Producto {
+        let prod = Producto::nuevo_simple(
             sku,
-            nombre: Nombre::new("Pan Test").unwrap(),
-            precio_usd: dec!(2),
-            impuesto_pct: dec!(16),
-            stock: Decimal::ZERO,
-            capacidades: caps,
-        };
+            Nombre::new("Pan Test").unwrap(),
+            dec!(2),
+            dec!(16),
+            Decimal::ZERO,
+            caps,
+        );
         db.guardar_producto(&prod).unwrap();
 
         let mut libro = LibroLotes::nuevo();
@@ -312,7 +312,7 @@ proptest! {
         for (sku_str, precio_usd, tasa) in &lineas {
             let sku = Sku::new(sku_str).unwrap();
             let nombre = Nombre::new("Test").unwrap();
-            lineas_venta.agregar(sku, nombre, dec!(1), *precio_usd, *tasa);
+            lineas_venta.agregar(sku, nombre, dec!(1), *precio_usd, *tasa, "unidad".to_string());
             total_bs_esperado += *precio_usd * *tasa;
         }
 
@@ -324,7 +324,7 @@ proptest! {
         for (sku_str, precio_usd, _tasa) in &lineas {
             let sku = Sku::new(sku_str).unwrap();
             let nombre = Nombre::new("Test").unwrap();
-            lineas_con_tasa_dia.agregar(sku, nombre, dec!(1), *precio_usd, tasa_dia);
+            lineas_con_tasa_dia.agregar(sku, nombre, dec!(1), *precio_usd, tasa_dia, "unidad".to_string());
         }
 
         prop_assert_ne!(lineas_venta.total_bs(), lineas_con_tasa_dia.total_bs());
@@ -342,11 +342,11 @@ proptest! {
         let _ = std::fs::remove_dir_all(&dir);
 
         let db = Database::abrir(dir.to_str().unwrap()).unwrap();
-        let _ = db.guardar_config(&ConfigNegocio {
-            nombre: Nombre::new("Test").unwrap(),
+        let _ = db.guardar_config(&ConfigNegocio::nuevo_simple(
+            Nombre::new("Test").unwrap(),
             rubros,
-            pin_dueno_sha256: "".into(),
-        });
+            "".into(),
+        ));
 
         let caps = capacidades_de_rubros(rubros);
         let mut skus = HashSet::new();
@@ -354,14 +354,14 @@ proptest! {
         for i in 0..n_productos {
             let sku_str = format!("SKU{}", i);
             let sku = Sku::new(&sku_str).unwrap();
-            let prod = Producto {
+            let prod = Producto::nuevo_simple(
                 sku,
-                nombre: Nombre::new(&format!("Prod {}", i)).unwrap(),
-                precio_usd: dec!(10) + Decimal::from(i),
-                impuesto_pct: dec!(16),
-                stock: dec!(100) + Decimal::from(i * 10),
-                capacidades: caps,
-            };
+                Nombre::new(&format!("Prod {}", i)).unwrap(),
+                dec!(10) + Decimal::from(i),
+                dec!(16),
+                dec!(100) + Decimal::from(i * 10),
+                caps,
+            );
             db.guardar_producto(&prod).unwrap();
             skus.insert(sku_str);
         }
@@ -477,14 +477,14 @@ proptest! {
         for (sku_str, precio, stock) in productos {
             if catalogo.indice_de(&sku_str).is_none() {
                 let sku = Sku::new(&sku_str).unwrap();
-                let prod = Producto {
+                let prod = Producto::nuevo_simple(
                     sku,
-                    nombre: Nombre::new("Test").unwrap(),
-                    precio_usd: precio,
-                    impuesto_pct: dec!(16),
+                    Nombre::new("Test").unwrap(),
+                    precio,
+                    dec!(16),
                     stock,
-                    capacidades: CAP_UNITARIA,
-                };
+                    CAP_UNITARIA,
+                );
                 catalogo.insertar(prod).unwrap();
                 expected += precio * stock;
             }

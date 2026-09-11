@@ -77,6 +77,11 @@ mod tests {
                 fecha_apertura_unix: 1000,
                 fecha_cierre_unix: 1000,
                 firma_sha256: "".into(),
+                tipo: "venta".into(),
+                cliente: None,
+                nota: None,
+                abonos_usd: None,
+                abonos_bs: None,
             },
             Venta {
                 id: "V2".into(),
@@ -97,6 +102,11 @@ mod tests {
                 fecha_apertura_unix: 2000,
                 fecha_cierre_unix: 2000,
                 firma_sha256: "".into(),
+                tipo: "venta".into(),
+                cliente: None,
+                nota: None,
+                abonos_usd: None,
+                abonos_bs: None,
             },
         ];
 

@@ -848,6 +848,8 @@ mod tests {
             unidad: None,
             es_caja: false,
             unidades_por_caja: None,
+            precio_paquete_usd: None,
+            nombre_paquete: None,
         }
     }
 
@@ -919,6 +921,10 @@ mod tests {
             nombre: Nombre::new("Mi Licoreria").unwrap(),
             rubros: RUBRO_LICORERIA,
             pin_dueno_sha256: "abc".into(),
+            licencia_clave: String::new(),
+            licencia_titular: String::new(),
+            licencia_estado: String::new(),
+            privacidad_inventario: false,
         })
         .unwrap();
         let cfg = db.cargar_config().unwrap().unwrap();
@@ -927,6 +933,10 @@ mod tests {
             nombre: Nombre::new("Otra").unwrap(),
             rubros: 1,
             pin_dueno_sha256: String::new(),
+            licencia_clave: String::new(),
+            licencia_titular: String::new(),
+            licencia_estado: String::new(),
+            privacidad_inventario: false,
         });
         assert!(matches!(
             duplicada,
