@@ -147,6 +147,16 @@ pub struct EventoTasaBcv {
     pub firma_sha256: String,
 }
 
+/// Presentacion de venta adicional de un producto (empaque, six-pack, caja, servicio combinado, etc.)
+/// unidades: cuantas unidades base del stock descuenta esta presentacion.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Presentacion {
+    pub nombre: String,
+    #[serde(with = "rust_decimal::serde::str")]
+    pub precio_usd: Decimal,
+    pub unidades: u32,
+}
+
 /// Autoritative price anchor is USD only. Bolivares are always derived.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Producto {
@@ -177,6 +187,8 @@ pub struct Producto {
     pub precio_paquete_usd: Option<Decimal>,
     #[serde(default)]
     pub nombre_paquete: Option<String>,
+    #[serde(default)]
+    pub presentaciones: Vec<Presentacion>,
 }
 
 impl Producto {
@@ -204,6 +216,7 @@ impl Producto {
             unidades_por_caja: None,
             precio_paquete_usd: None,
             nombre_paquete: None,
+            presentaciones: Vec::new(),
         }
     }
 }
@@ -227,6 +240,7 @@ pub struct Catalogo {
     unidades_por_cajas: Vec<Option<u32>>,
     precios_paquete_usd: Vec<Option<Decimal>>,
     nombres_paquete: Vec<Option<String>>,
+    presentaciones: Vec<Vec<Presentacion>>,
 }
 
 impl Catalogo {
@@ -264,6 +278,7 @@ impl Catalogo {
         self.unidades_por_cajas.push(p.unidades_por_caja);
         self.precios_paquete_usd.push(p.precio_paquete_usd);
         self.nombres_paquete.push(p.nombre_paquete);
+        self.presentaciones.push(p.presentaciones);
         Ok(idx)
     }
 
@@ -339,6 +354,18 @@ impl Catalogo {
         self.nombres_paquete[idx].clone()
     }
 
+    pub fn presentaciones(&self, idx: usize) -> &[Presentacion] {
+        &self.presentaciones[idx]
+    }
+
+    /// Busca una presentacion por nombre (case-insensitive) y retorna (precio_usd, unidades)
+    pub fn presentacion_por_nombre(&self, idx: usize, nombre: &str) -> Option<(Decimal, u32)> {
+        self.presentaciones[idx]
+            .iter()
+            .find(|p| p.nombre.eq_ignore_ascii_case(nombre))
+            .map(|p| (p.precio_usd, p.unidades))
+    }
+
     /// Zero-copy in-place stock mutation over the contiguous column.
     /// Stock is clamped to zero minimum — never goes negative.
     pub fn aplicar_delta_stock(&mut self, idx: usize, delta: Decimal) {
@@ -375,6 +402,7 @@ impl Catalogo {
             unidades_por_caja: self.unidades_por_cajas[idx],
             precio_paquete_usd: self.precios_paquete_usd[idx],
             nombre_paquete: self.nombres_paquete[idx].clone(),
+            presentaciones: self.presentaciones[idx].clone(),
         }
     }
 

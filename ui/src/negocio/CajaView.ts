@@ -1292,6 +1292,24 @@ export class CajaView {
 
                 const tienePaquete = (p.precioPaqueteUsd && p.nombrePaquete) || (p.esCaja && p.unidadesPorCaja && p.unidadesPorCaja > 1);
 
+                const botonesPresentaciones = (p.presentaciones && p.presentaciones.length > 0)
+                    ? p.presentaciones.map((pres) => `
+                        <button data-sku="${p.sku}" data-modo="${pres.nombre}" ${sinStock && !p.sinStock ? 'disabled' : ''}
+                            class="text-left border-2 border-brand-purple rounded p-2 bg-purple-50 shadow-brutal hover:-translate-y-0.5 hover:shadow-brutal-hover transition-all active:translate-y-0.5 active:shadow-none disabled:opacity-30 w-full mt-1">
+                            <div class="flex justify-between items-center">
+                                <span class="font-heading font-bold text-xs text-purple-800">${pres.nombre} ($${Number(pres.precioUsd).toFixed(2)})</span>
+                                <span class="text-[10px] font-black text-purple-600">${pres.unidades} un.</span>
+                            </div>
+                        </button>`).join('')
+                    : (tienePaquete ? `
+                        <button data-sku="${p.sku}" data-modo="paquete" ${sinStock && !p.sinStock ? 'disabled' : ''}
+                            class="text-left border-2 border-brand-purple rounded p-2 bg-purple-50 shadow-brutal hover:-translate-y-0.5 hover:shadow-brutal-hover transition-all active:translate-y-0.5 active:shadow-none disabled:opacity-30 w-full mt-1">
+                            <div class="flex justify-between items-center">
+                                <span class="font-heading font-bold text-xs text-purple-800">${p.nombrePaquete || 'Caja'} (${p.precioPaqueteUsd ? `$${Number(p.precioPaqueteUsd).toFixed(2)}` : `$${(Number(p.precioUsd) * (p.unidadesPorCaja || 1)).toFixed(2)}`})</span>
+                                <span class="text-[10px] font-black text-purple-600">${p.unidadesPorCaja || 1} un.</span>
+                            </div>
+                        </button>` : '');
+
                 return `
                 <div class="relative" data-producto-card="${p.sku}">
                     <button data-sku="${p.sku}" data-modo="unidad" ${sinStock && !p.sinStock ? 'disabled' : ''}
@@ -1310,14 +1328,7 @@ export class CajaView {
                             </span>
                         </div>
                     </button>
-                    ${tienePaquete ? `
-                    <button data-sku="${p.sku}" data-modo="paquete" ${sinStock && !p.sinStock ? 'disabled' : ''}
-                        class="text-left border-2 border-brand-purple rounded p-2 bg-purple-50 shadow-brutal hover:-translate-y-0.5 hover:shadow-brutal-hover transition-all active:translate-y-0.5 active:shadow-none disabled:opacity-30 w-full mt-1">
-                        <div class="flex justify-between items-center">
-                            <span class="font-heading font-bold text-xs text-purple-800">${p.nombrePaquete || 'Caja'} (${p.precioPaqueteUsd ? `$${Number(p.precioPaqueteUsd).toFixed(2)}` : `$${(Number(p.precioUsd) * (p.unidadesPorCaja || 1)).toFixed(2)}`})</span>
-                            <span class="text-[10px] font-black text-purple-600">${p.unidadesPorCaja || 1} un.</span>
-                        </div>
-                    </button>` : ''}
+                    ${botonesPresentaciones}
                 </div>`;
             })
             .join('');

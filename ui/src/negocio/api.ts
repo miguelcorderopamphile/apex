@@ -146,6 +146,7 @@ export interface ProductoInfo {
     unidadesPorCaja?: number;
     precioPaqueteUsd?: string;
     nombrePaquete?: string;
+    presentaciones?: { nombre: string; precioUsd: string; unidades: number }[];
 }
 
 export interface LineaTicket {
@@ -1019,6 +1020,9 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
                 unidadesPorCaja,
                 precioPaqueteUsd: input?.precioPaqueteUsd ? String(input.precioPaqueteUsd) : undefined,
                 nombrePaquete: input?.nombrePaquete ? String(input.nombrePaquete) : undefined,
+                presentaciones: Array.isArray(input?.presentaciones)
+                    ? (input.presentaciones as { nombre: string; precioUsd: string; unidades: number }[])
+                    : [],
             };
             demoStore.productos.push(nuevo);
             demoStore.persist();
@@ -1048,13 +1052,20 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
                 if (prod) {
                     const cant = Number(item.cantidad);
                     const modo = item.modo_venta || 'unidad';
-                    const esPaquete = modo === 'paquete' && (prod.precioPaqueteUsd || (prod.esCaja && prod.unidadesPorCaja && prod.unidadesPorCaja > 1));
-                    const unidadesPaquete = esPaquete ? (prod.unidadesPorCaja || 1) : 1;
-                    const precioEfectivo = esPaquete
-                        ? (prod.precioPaqueteUsd ? Number(prod.precioPaqueteUsd) : Number(prod.precioUsd) * unidadesPaquete)
-                        : Number(prod.precioUsd);
+                    const pres = modo !== 'unidad'
+                        ? prod.presentaciones?.find((p) => p.nombre.toLowerCase() === modo.toLowerCase())
+                        : undefined;
+                    const esPaquete = !pres && modo === 'paquete' && (prod.precioPaqueteUsd || (prod.esCaja && prod.unidadesPorCaja && prod.unidadesPorCaja > 1));
+                    const unidadesDesc = pres
+                        ? pres.unidades
+                        : (esPaquete ? (prod.unidadesPorCaja || 1) : 1);
+                    const precioEfectivo = pres
+                        ? Number(pres.precioUsd)
+                        : (esPaquete
+                            ? (prod.precioPaqueteUsd ? Number(prod.precioPaqueteUsd) : Number(prod.precioUsd) * (prod.unidadesPorCaja || 1))
+                            : Number(prod.precioUsd));
                     totalUsd += precioEfectivo * cant;
-                    prod.stock = String(Math.max(0, Number(prod.stock) - unidadesPaquete * cant));
+                    prod.stock = String(Math.max(0, Number(prod.stock) - unidadesDesc * cant));
                 }
             });
             const totalBs = totalUsd * tasa;
@@ -1195,11 +1206,18 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
             const cuenta = demoStore.cuentas.find((c) => c.ventaId === ventaId);
             const prod = demoStore.productos.find((p) => p.sku.trim().toUpperCase() === sku);
             if (cuenta && prod) {
-                const esPaquete = modo === 'paquete' && (prod.precioPaqueteUsd || (prod.esCaja && prod.unidadesPorCaja && prod.unidadesPorCaja > 1));
-                const unidadesPaquete = esPaquete ? (prod.unidadesPorCaja || 1) : 1;
-                const precioEfectivo = esPaquete
-                    ? (prod.precioPaqueteUsd ? parseNum(prod.precioPaqueteUsd) : parseNum(prod.precioUsd) * unidadesPaquete)
-                    : parseNum(prod.precioUsd);
+                const pres = modo !== 'unidad'
+                    ? prod.presentaciones?.find((p) => p.nombre.toLowerCase() === modo.toLowerCase())
+                    : undefined;
+                const esPaquete = !pres && modo === 'paquete' && (prod.precioPaqueteUsd || (prod.esCaja && prod.unidadesPorCaja && prod.unidadesPorCaja > 1));
+                const unidadesPaquete = pres
+                    ? pres.unidades
+                    : (esPaquete ? (prod.unidadesPorCaja || 1) : 1);
+                const precioEfectivo = pres
+                    ? parseNum(pres.precioUsd)
+                    : (esPaquete
+                        ? (prod.precioPaqueteUsd ? parseNum(prod.precioPaqueteUsd) : parseNum(prod.precioUsd) * unidadesPaquete)
+                        : parseNum(prod.precioUsd));
                 const unidades = cant * unidadesPaquete;
                 if (!prod.sinStock) {
                     const st = parseNum(prod.stock);
@@ -1954,6 +1972,7 @@ export const api = {
         pesable: boolean; alcoholica: boolean; categoriaId?: string; sinStock?: boolean;
         unidad?: 'un' | 'kg' | 'ml'; esCaja?: boolean; unidadesPorCaja?: number;
         precioPaqueteUsd?: string; nombrePaquete?: string;
+        presentaciones?: { nombre: string; precioUsd: string; unidades: number }[];
     }) => {
         const sku = p.sku && p.sku.trim() ? p.sku.trim().toUpperCase() : 'PROD-' + Math.random().toString(36).slice(2, 8).toUpperCase();
         return invocar<void>('crear_producto', { input: { ...p, sku } });

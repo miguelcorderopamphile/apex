@@ -849,6 +849,7 @@ mod tests {
             unidades_por_caja: None,
             precio_paquete_usd: None,
             nombre_paquete: None,
+            presentaciones: Vec::new(),
         }
     }
 

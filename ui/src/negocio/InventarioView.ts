@@ -248,7 +248,7 @@ export class InventarioView {
                         <div class="pt-2 border-t border-gray-300">
                             <label class="inline-flex items-center gap-2 cursor-pointer select-none">
                                 <input id="prod-tiene-paquete" type="checkbox" class="w-4 h-4 border-2 border-brand-purple rounded text-brand-purple focus:ring-0" />
-                                <span class="font-bold text-xs sm:text-sm">¿Tiene precio por paquete / caja?</span>
+                                <span class="font-bold text-xs sm:text-sm">¿Tiene precio por paquete / caja único?</span>
                             </label>
                             <div id="box-paquete-config" class="hidden grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                                 <div>
@@ -262,6 +262,18 @@ export class InventarioView {
                                     <span class="text-[10px] text-gray-500">Precio de venta por empaque completo</span>
                                 </div>
                             </div>
+                        </div>
+                        <div class="pt-2 border-t border-gray-300 space-y-2">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <span class="font-bold text-xs sm:text-sm text-brand-purple">Múltiples Presentaciones (Diferentes Tamaños / Empaques)</span>
+                                    <p class="text-[10px] text-gray-500">Ej: Six-pack (6 un.), Tobo (10 un.), Caja (24 un.). Descuento dinámico exacto de stock.</p>
+                                </div>
+                                <button type="button" id="btn-agregar-presentacion" class="bg-brand-purple text-white font-heading font-black text-[10px] px-2.5 py-1 rounded border border-brand-black hover:bg-purple-800 shadow-brutal-sm">
+                                    + PRESENTACIÓN
+                                </button>
+                            </div>
+                            <div id="presentaciones-lista" class="space-y-1.5 pt-1"></div>
                         </div>
                     </div>
 
@@ -556,6 +568,41 @@ export class InventarioView {
 
         inStockCajas?.addEventListener('input', recalcularStockDesdeCajas);
         inUnidadesCaja?.addEventListener('input', recalcularStockDesdeCajas);
+
+        // Presentaciones dinámicas múltiples
+        const listaPres = document.getElementById('presentaciones-lista');
+        const btnAddPres = document.getElementById('btn-agregar-presentacion');
+        let presSeq = 0;
+        const agregarFilaPresentacion = () => {
+            const idx = presSeq++;
+            const row = document.createElement('div');
+            row.id = `pres-row-${idx}`;
+            row.className = 'grid grid-cols-[1fr_90px_70px_32px] gap-2 items-center bg-white border border-brand-black rounded p-2';
+            row.innerHTML = `
+                <div>
+                    <label class="block text-[9px] font-bold uppercase text-gray-600 mb-0.5">Nombre</label>
+                    <input id="pres-nombre-${idx}" type="text" maxlength="30" placeholder="Ej: Six-pack, Tobo, Caja" class="w-full border border-brand-black rounded px-2 py-1 font-bold text-xs bg-gray-50 focus:bg-white" />
+                </div>
+                <div>
+                    <label class="block text-[9px] font-bold uppercase text-gray-600 mb-0.5">Precio ($)</label>
+                    <input id="pres-precio-${idx}" type="number" min="0.01" step="0.01" placeholder="0.00" class="w-full border border-brand-black rounded px-1.5 py-1 font-bold text-xs bg-gray-50 focus:bg-white" />
+                </div>
+                <div>
+                    <label class="block text-[9px] font-bold uppercase text-gray-600 mb-0.5">Unidades</label>
+                    <input id="pres-unidades-${idx}" type="number" min="1" max="9999" step="1" value="1" placeholder="1" class="w-full border border-brand-black rounded px-1.5 py-1 font-bold text-xs bg-gray-50 focus:bg-white" />
+                </div>
+                <div class="pt-3">
+                    <button type="button" data-del-pres="${idx}" title="Eliminar presentación" class="w-7 h-7 rounded border border-red-400 text-red-600 hover:bg-red-50 font-black text-sm flex items-center justify-center">&times;</button>
+                </div>
+            `;
+            listaPres?.appendChild(row);
+            row.querySelector(`[data-del-pres="${idx}"]`)?.addEventListener('click', () => {
+                row.remove();
+            });
+        };
+        btnAddPres?.addEventListener('click', () => {
+            agregarFilaPresentacion();
+        });
 
         // Form alta producto
         document.getElementById('form-nuevo-producto')?.addEventListener('submit', (e) => {
@@ -1065,6 +1112,25 @@ export class InventarioView {
         const nombrePaquete = tienePaquete && inNombrePaquete ? inNombrePaquete.value.trim() : undefined;
         const precioPaqueteUsd = tienePaquete && inPrecioPaquete ? parseVal(inPrecioPaquete.value).toFixed(2) : undefined;
 
+        // Recopilar presentaciones adicionales dinámicas
+        const presentaciones: { nombre: string; precioUsd: string; unidades: number }[] = [];
+        document.querySelectorAll('[id^="pres-row-"]').forEach((row) => {
+            const idx = (row.id as string).replace('pres-row-', '');
+            const inNom = document.getElementById(`pres-nombre-${idx}`) as HTMLInputElement | null;
+            const inPre = document.getElementById(`pres-precio-${idx}`) as HTMLInputElement | null;
+            const inUni = document.getElementById(`pres-unidades-${idx}`) as HTMLInputElement | null;
+            const nom = inNom?.value.trim();
+            const pre = parseVal(inPre?.value);
+            const uni = parseInt(inUni?.value || '1', 10);
+            if (nom && pre > 0 && Number.isFinite(uni) && uni >= 1) {
+                presentaciones.push({
+                    nombre: nom,
+                    precioUsd: pre.toFixed(2),
+                    unidades: uni,
+                });
+            }
+        });
+
         try {
             await api.crearProducto({
                 nombre: inNombre.value.trim(),
@@ -1082,6 +1148,7 @@ export class InventarioView {
                 unidadesPorCaja,
                 precioPaqueteUsd,
                 nombrePaquete,
+                presentaciones: presentaciones.length > 0 ? presentaciones : undefined,
             });
 
             if (msgEl) {

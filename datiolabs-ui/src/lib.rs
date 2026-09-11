@@ -656,6 +656,11 @@ async fn api_productos(
             unidades_por_caja: catalogo.unidades_por_caja(i),
             precio_paquete_usd: catalogo.precio_paquete_usd(i),
             nombre_paquete: catalogo.nombre_paquete(i),
+            presentaciones: catalogo
+                .presentaciones(i)
+                .iter()
+                .map(PresentacionDto::from)
+                .collect(),
         })
         .collect();
     Ok(Json(filas))
@@ -754,11 +759,8 @@ async fn api_cuentas_consumo(
     let cant: rust_decimal::Decimal = cantidad
         .parse()
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Cantidad inválida: {e}")))?;
-    let cant_unidades = if modo == "paquete" && catalogo.es_caja(idx) {
-        cant * rust_decimal::Decimal::from(catalogo.unidades_por_caja(idx).unwrap_or(1))
-    } else {
-        cant
-    };
+    let (precio_efectivo, unidades_por_venta) = resolver_precio_presentacion(&catalogo, idx, &modo);
+    let cant_unidades = cant * rust_decimal::Decimal::from(unidades_por_venta);
     validar_linea(
         catalogo.capacidades(idx),
         cant_unidades,
@@ -767,13 +769,6 @@ async fn api_cuentas_consumo(
     .map_err(|e| (StatusCode::BAD_REQUEST, format!("{e}")))?;
     let tasa = state.servicio_tasa.info_actual().valor;
     let sku_obj = catalogo.sku_obj(idx);
-    let precio_efectivo = if modo == "paquete" {
-        catalogo
-            .precio_paquete_usd(idx)
-            .unwrap_or(catalogo.precio_usd(idx))
-    } else {
-        catalogo.precio_usd(idx)
-    };
     if let Some(pos) = venta.lineas.skus.iter().position(|s| s == &sku_obj) {
         venta.lineas.cantidades[pos] += cant;
     } else {
@@ -1395,13 +1390,9 @@ async fn api_ventas_registrar(
             StatusCode::BAD_REQUEST,
             format!("SKU inexistente: {sku_str}"),
         ))?;
-        let tiene_paquete = catalogo.precio_paquete_usd(idx).is_some()
-            || (catalogo.es_caja(idx) && catalogo.unidades_por_caja(idx).unwrap_or(0) > 1);
-        let cant_unidades = if modo == "paquete" && tiene_paquete {
-            cant * rust_decimal::Decimal::from(catalogo.unidades_por_caja(idx).unwrap_or(1))
-        } else {
-            cant
-        };
+        let (precio_efectivo, unidades_por_venta) =
+            resolver_precio_presentacion(&catalogo, idx, modo);
+        let cant_unidades = cant * rust_decimal::Decimal::from(unidades_por_venta);
         validar_linea(
             catalogo.capacidades(idx),
             cant_unidades,
@@ -1409,13 +1400,6 @@ async fn api_ventas_registrar(
         )
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("{e}")))?;
         toques.push((idx, cant, modo.to_string()));
-        let precio_efectivo = if modo == "paquete" && tiene_paquete {
-            catalogo
-                .precio_paquete_usd(idx)
-                .unwrap_or(catalogo.precio_usd(idx))
-        } else {
-            catalogo.precio_usd(idx)
-        };
         lineas.agregar(
             catalogo.sku_obj(idx),
             catalogo.nombre_obj(idx),
@@ -2822,6 +2806,24 @@ struct ConfigDto {
     privacidad_inventario: bool,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct PresentacionDto {
+    nombre: String,
+    precio_usd: String,
+    unidades: u32,
+}
+
+impl From<&datiolabs_core::models::Presentacion> for PresentacionDto {
+    fn from(p: &datiolabs_core::models::Presentacion) -> Self {
+        Self {
+            nombre: p.nombre.clone(),
+            precio_usd: p.precio_usd.to_string(),
+            unidades: p.unidades,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ProductoInput {
@@ -2849,6 +2851,8 @@ struct ProductoInput {
     precio_paquete_usd: Option<String>,
     #[serde(default)]
     nombre_paquete: Option<String>,
+    #[serde(default)]
+    presentaciones: Option<Vec<PresentacionDto>>,
 }
 
 #[derive(Serialize)]
@@ -2878,6 +2882,8 @@ struct ProductoDto {
     precio_paquete_usd: Option<Decimal>,
     #[serde(skip_serializing_if = "Option::is_none")]
     nombre_paquete: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    presentaciones: Vec<PresentacionDto>,
 }
 
 #[derive(Deserialize)]
@@ -3103,8 +3109,13 @@ fn descontar_con_lotes_interno(
     venta_id: &str,
     modo_venta: &str,
 ) -> Result<(), DbError> {
+    // Resolucion dinamica de unidades a descontar segun la presentacion activa
     let mut unidades = cantidad;
-    if modo_venta == "paquete" && catalogo.es_caja(idx) {
+    if let Some((_, upc)) = catalogo.presentacion_por_nombre(idx, modo_venta) {
+        if upc > 0 {
+            unidades = cantidad * Decimal::from(upc);
+        }
+    } else if modo_venta == "paquete" && catalogo.es_caja(idx) {
         if let Some(upc) = catalogo.unidades_por_caja(idx) {
             if upc > 0 {
                 unidades = cantidad * Decimal::from(upc);
@@ -3316,6 +3327,20 @@ fn crear_producto(estado: tauri::State<AppState>, input: ProductoInput) -> Resul
             .as_deref()
             .and_then(|s| decimal_de(s).ok()),
         nombre_paquete: input.nombre_paquete.clone(),
+        presentaciones: input
+            .presentaciones
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|p| {
+                decimal_de(&p.precio_usd).ok().map(|precio_usd| {
+                    datiolabs_core::models::Presentacion {
+                        nombre: p.nombre,
+                        precio_usd,
+                        unidades: p.unidades.max(1),
+                    }
+                })
+            })
+            .collect(),
     };
     if producto.sku.as_str().is_empty()
         || producto.nombre.as_str().is_empty()
@@ -3367,6 +3392,7 @@ fn listar_productos(estado: tauri::State<AppState>) -> Result<Vec<ProductoDto>, 
             unidades_por_caja: p.unidades_por_caja,
             precio_paquete_usd: p.precio_paquete_usd,
             nombre_paquete: p.nombre_paquete,
+            presentaciones: p.presentaciones.iter().map(PresentacionDto::from).collect(),
         })
         .collect();
     Ok(filas)
@@ -3475,6 +3501,29 @@ fn crear_lote(
     Ok(lote.id)
 }
 
+/// Resuelve el precio efectivo de venta y las unidades base a descontar del stock
+/// para el modo/presentacion solicitado. Compatible con presentaciones multiples y
+/// con el campo legacy es_caja/nombre_paquete.
+fn resolver_precio_presentacion(catalogo: &Catalogo, idx: usize, modo: &str) -> (Decimal, u32) {
+    if modo == "unidad" || modo.is_empty() {
+        return (catalogo.precio_usd(idx), 1);
+    }
+    // Buscar en presentaciones multiples
+    if let Some((precio, upc)) = catalogo.presentacion_por_nombre(idx, modo) {
+        return (precio, upc.max(1));
+    }
+    // Compatibilidad legacy: modo "paquete" con es_caja
+    if modo == "paquete" && catalogo.es_caja(idx) {
+        let upc = catalogo.unidades_por_caja(idx).unwrap_or(1).max(1);
+        let precio = catalogo
+            .precio_paquete_usd(idx)
+            .unwrap_or_else(|| catalogo.precio_usd(idx) * Decimal::from(upc));
+        return (precio, upc);
+    }
+    // Fallback: unidad base
+    (catalogo.precio_usd(idx), 1)
+}
+
 // ---------------- comandos: venta directa ----------------
 
 #[tauri::command]
@@ -3522,31 +3571,15 @@ fn registrar_venta(
                 .ok_or(DbError::Negocio(ErrorNegocio::ProductoInexistente))?;
             let cantidad = decimal_de(&item.cantidad)?;
             let modo = item.modo_venta.as_deref().unwrap_or("unidad");
-            let tiene_paquete = catalogo.precio_paquete_usd(idx).is_some()
-                || (catalogo.es_caja(idx) && catalogo.unidades_por_caja(idx).unwrap_or(0) > 1);
-            let cant_unidades = if modo == "paquete" && tiene_paquete {
-                cantidad * Decimal::from(catalogo.unidades_por_caja(idx).unwrap_or(1))
-            } else {
-                cantidad
-            };
+            let (precio_efectivo, unidades_por_venta) =
+                resolver_precio_presentacion(&catalogo, idx, modo);
+            let cant_unidades = cantidad * Decimal::from(unidades_por_venta);
             validar_linea(
                 catalogo.capacidades(idx),
                 cant_unidades,
                 catalogo.stock(idx),
             )?;
             toques.push((idx, cantidad, modo.to_string()));
-            let precio_efectivo = if modo == "paquete" && tiene_paquete {
-                match catalogo.precio_paquete_usd(idx) {
-                    Some(p) => p,
-                    None => {
-                        // Paquete sin precio explícito: precio unitario × unidades por caja
-                        let upc = Decimal::from(catalogo.unidades_por_caja(idx).unwrap_or(1));
-                        catalogo.precio_usd(idx) * upc
-                    }
-                }
-            } else {
-                catalogo.precio_usd(idx)
-            };
             lineas.agregar(
                 catalogo.sku_obj(idx),
                 catalogo.nombre_obj(idx),
@@ -3860,11 +3893,9 @@ fn agregar_consumo(
         let idx = catalogo
             .indice_de(sku.trim().to_uppercase().as_str())
             .ok_or(DbError::Negocio(ErrorNegocio::ProductoInexistente))?;
-        let cant_unidades = if modo == "paquete" && catalogo.es_caja(idx) {
-            cant * Decimal::from(catalogo.unidades_por_caja(idx).unwrap_or(1))
-        } else {
-            cant
-        };
+        let (precio_efectivo, unidades_por_venta) =
+            resolver_precio_presentacion(&catalogo, idx, &modo);
+        let cant_unidades = cant * Decimal::from(unidades_por_venta);
         validar_linea(
             catalogo.capacidades(idx),
             cant_unidades,
@@ -3872,17 +3903,6 @@ fn agregar_consumo(
         )?;
 
         let sku_obj = catalogo.sku_obj(idx);
-        let precio_efectivo = if modo == "paquete" {
-            match catalogo.precio_paquete_usd(idx) {
-                Some(p) => p,
-                None => {
-                    let upc = Decimal::from(catalogo.unidades_por_caja(idx).unwrap_or(1));
-                    catalogo.precio_usd(idx) * upc
-                }
-            }
-        } else {
-            catalogo.precio_usd(idx)
-        };
         if let Some(pos) = venta.lineas.skus.iter().position(|s| s == &sku_obj) {
             venta.lineas.cantidades[pos] += cant;
         } else {

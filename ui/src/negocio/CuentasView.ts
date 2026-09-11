@@ -659,6 +659,22 @@ export class CuentasView {
                     grid.innerHTML = filtrados.map((p) => {
                         const agotado = !p.sinStock && (Number(p.stock) <= 0);
                         const tienePaquete = (p.precioPaqueteUsd && p.nombrePaquete) || (p.esCaja && p.unidadesPorCaja && p.unidadesPorCaja > 1);
+                        const botonesPresentaciones = (p.presentaciones && p.presentaciones.length > 0)
+                            ? p.presentaciones.map((pres) => `
+                                <button data-add-sku="${p.sku}" data-modo="${pres.nombre}" data-agotado="${agotado ? "1" : "0"}" class="text-left border-2 border-brand-purple rounded p-1 transition-all text-[10px] font-bold mt-1 w-full ${agotado ? "bg-gray-100 opacity-60 cursor-not-allowed" : "bg-purple-50 hover:bg-purple-100 shadow-sm hover:shadow-brutal-sm"}">
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-purple-800">${pres.nombre} ($${Number(pres.precioUsd).toFixed(2)})</span>
+                                        <span class="text-purple-600">${pres.unidades} un.</span>
+                                    </div>
+                                </button>`).join("")
+                            : (tienePaquete ? `
+                                <button data-add-sku="${p.sku}" data-modo="paquete" data-agotado="${agotado ? "1" : "0"}" class="text-left border-2 border-brand-purple rounded p-1 transition-all text-[10px] font-bold mt-1 w-full ${agotado ? "bg-gray-100 opacity-60 cursor-not-allowed" : "bg-purple-50 hover:bg-purple-100 shadow-sm hover:shadow-brutal-sm"}">
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-purple-800">${p.nombrePaquete || 'Caja'} (${p.precioPaqueteUsd ? `$${Number(p.precioPaqueteUsd).toFixed(2)}` : `$${(Number(p.precioUsd) * (p.unidadesPorCaja || 1)).toFixed(2)}`})</span>
+                                        <span class="text-purple-600">${p.unidadesPorCaja || 1} un.</span>
+                                    </div>
+                                </button>` : '');
+
                         return `
                         <div class="relative" data-producto-row="${p.sku}">
                             <button data-add-sku="${p.sku}" data-modo="unidad" data-agotado="${agotado ? "1" : "0"}" class="text-left border-2 border-brand-black rounded p-2 transition-all text-xs font-bold ${agotado ? "bg-gray-100 opacity-60 cursor-not-allowed" : "bg-gray-50 hover:bg-white shadow-sm hover:shadow-brutal-sm"} w-full">
@@ -671,13 +687,7 @@ export class CuentasView {
                                     <span class="text-[10px] ${agotado ? "text-red-700 font-black" : "text-gray-500"}">${fmtStock(p)}</span>
                                 </div>
                             </button>
-                            ${tienePaquete ? `
-                            <button data-add-sku="${p.sku}" data-modo="paquete" data-agotado="${agotado ? "1" : "0"}" class="text-left border-2 border-brand-purple rounded p-1 transition-all text-[10px] font-bold mt-1 w-full ${agotado ? "bg-gray-100 opacity-60 cursor-not-allowed" : "bg-purple-50 hover:bg-purple-100 shadow-sm hover:shadow-brutal-sm"}">
-                                <div class="flex justify-between items-center">
-                                    <span class="text-purple-800">${p.nombrePaquete || 'Caja'} (${p.precioPaqueteUsd ? `$${Number(p.precioPaqueteUsd).toFixed(2)}` : `$${(Number(p.precioUsd) * (p.unidadesPorCaja || 1)).toFixed(2)}`})</span>
-                                    <span class="text-purple-600">${p.unidadesPorCaja || 1} un.</span>
-                                </div>
-                            </button>` : ''}
+                            ${botonesPresentaciones}
                         </div>`;
                     }).join("");
                     this.vincularBotonesAgregar(grid);
