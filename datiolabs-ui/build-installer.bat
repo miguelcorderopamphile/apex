@@ -2,7 +2,7 @@
 REM DatioLabs Retail - Build Installer (Batch wrapper)
 REM Ejecuta: build-installer.bat [clean] [skip-frontend] [version]
 
-set VERSION=0.1.0
+set VERSION=1.0.0
 set CLEAN=0
 set SKIP_FRONTEND=0
 

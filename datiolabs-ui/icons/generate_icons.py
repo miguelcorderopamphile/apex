@@ -2,22 +2,6 @@ import struct
 import zlib
 import math
 
-def point_in_poly(x, y, poly):
-    n = len(poly)
-    inside = False
-    p1x, p1y = poly[0]
-    for i in range(n + 1):
-        p2x, p2y = poly[i % n]
-        if y > min(p1y, p2y):
-            if y <= max(p1y, p2y):
-                if x <= max(p1x, p2x):
-                    if p1y != p2y:
-                        xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
-                    if p1x == p2x or x <= xinters:
-                        inside = not inside
-        p1x, p1y = p2x, p2y
-    return inside
-
 def dist_to_rounded_box(x, y, x0, y0, x1, y1, r):
     dx = max(x0 + r - x, 0, x - (x1 - r))
     dy = max(y0 + r - y, 0, y - (y1 - r))
@@ -36,79 +20,79 @@ def blend(c1, c2, factor):
     a = int(c1[3] * (1 - f) + c2[3] * f)
     return (r, g, b, a)
 
-def render_datiolabs_icon(width, height):
-    # Genera un icono de alta definición con prisma de datos y nodo de integridad
+def render_d_icon(width, height):
+    # Genera el isotipo corporativo 'D.' de DatioLabs con precisión geométrica y anti-aliasing
+    # Estética: Fondo Slate 900 oscuro (#0F172A), Borde brutalista, Letra 'D' mayúscula en blanco puro (#FFFFFF)
+    # y Punto corporativo '.' en Azul Cobalto / Cobalto Radiante (#2563EB)
     pixels = []
     
-    # Colores institucionales
-    c_bg_top = (15, 23, 42, 255)       # Slate 900 #0F172A
-    c_bg_bottom = (30, 41, 59, 255)    # Slate 800 #1E293B
-    c_border = (51, 65, 85, 255)       # Slate 700 #334155
-    c_accent_blue = (37, 99, 235, 255)  # Cobalt Blue #2563EB
-    c_accent_cyan = (56, 189, 248, 255) # Cyan 400 #38BDF8
-    c_accent_darkblue = (29, 78, 216, 255) # Blue 700 #1D4ED8
-    c_amber = (245, 158, 11, 255)      # Amber 500 #F59E0B
-    c_white = (255, 255, 255, 255)
-    
-    cx = width * 0.48
-    cy = height * 0.50
-    s = min(width, height) * 0.35
-    
-    # Vertices isometricos
-    v_center = (cx, cy)
-    v_top = (cx, cy - s * 0.82)
-    v_top_right = (cx + s * 0.72, cy - s * 0.41)
-    v_top_left = (cx - s * 0.72, cy - s * 0.41)
-    v_bottom = (cx, cy + s * 0.82)
-    v_bottom_right = (cx + s * 0.72, cy + s * 0.41)
-    v_bottom_left = (cx - s * 0.72, cy + s * 0.41)
-    
-    poly_top = [v_top, v_top_right, v_center, v_top_left]
-    poly_left = [v_top_left, v_center, v_bottom, v_bottom_left]
-    poly_right = [v_center, v_top_right, v_bottom_right, v_bottom]
-    
-    # Nodo de integridad (dorado / ambar)
-    dot_cx = cx + s * 0.78
-    dot_cy = cy - s * 0.56
-    dot_radius = s * 0.18
+    c_bg_top = (15, 23, 42, 255)       # #0F172A (Slate 900)
+    c_bg_bottom = (30, 41, 59, 255)    # #1E293B (Slate 800)
+    c_border = (51, 65, 85, 255)       # #334155 (Slate 700)
+    c_white = (255, 255, 255, 255)     # Letra D
+    c_dot = (37, 99, 235, 255)         # #2563EB (Azul cobalto corporativo)
     
     pad = max(1.0, width * 0.05)
-    corner_r = width * 0.20
+    corner_r = width * 0.22
     
+    # Dimensiones de la letra D centrada hacia la izquierda (nx: 0.18 a 0.64, ny: 0.22 a 0.78)
+    # y el punto '.' (nx: 0.70 a 0.82, ny: 0.65 a 0.78)
     for y in range(height):
         row = []
         ny = y / height
         for x in range(width):
-            d_box = dist_to_rounded_box(x, y, pad, pad, width - pad, height - pad, corner_r)
+            nx = x / width
             
+            d_box = dist_to_rounded_box(x, y, pad, pad, width - pad, height - pad, corner_r)
             if d_box > 0:
                 row.append((0, 0, 0, 0))
                 continue
-            
+                
             bg_col = blend(c_bg_top, c_bg_bottom, ny)
-            
-            if d_box > -1.8:
+            if d_box > -1.5:
                 row.append(c_border)
                 continue
                 
             col = bg_col
             
-            if point_in_poly(x, y, poly_top):
-                lx = (x - (cx - s * 0.72)) / (s * 1.44)
-                col = blend(c_accent_cyan, c_white, 0.25 - lx * 0.1)
-            elif point_in_poly(x, y, poly_left):
-                col = c_accent_blue
-            elif point_in_poly(x, y, poly_right):
-                col = c_accent_darkblue
+            # --- Render de la letra 'D' ---
+            # Límites exteriores de D:
+            # Barra vertical izquierda: x in [0.20, 0.33], y in [0.22, 0.78]
+            # Barra superior: y in [0.22, 0.33], x in [0.20, 0.50]
+            # Barra inferior: y in [0.67, 0.78], x in [0.20, 0.50]
+            # Arco derecho: elipse exterior centrada en (0.42, 0.50), radio_x 0.22, radio_y 0.28
+            # Hueco interior de D: elipse centrada en (0.40, 0.50), radio_x 0.10, radio_y 0.17
+            in_d_outer = False
+            if 0.20 <= nx <= 0.33 and 0.22 <= ny <= 0.78:
+                in_d_outer = True
+            elif (0.22 <= ny <= 0.33 or 0.67 <= ny <= 0.78) and 0.20 <= nx <= 0.44:
+                in_d_outer = True
+            elif nx >= 0.40:
+                dx = (nx - 0.40) / 0.24
+                dy = (ny - 0.50) / 0.28
+                if dx * dx + dy * dy <= 1.0 and 0.22 <= ny <= 0.78:
+                    in_d_outer = True
+                    
+            in_d_inner = False
+            if in_d_outer and nx >= 0.33:
+                dx_in = (nx - 0.33) / 0.12
+                dy_in = (ny - 0.50) / 0.17
+                if dx_in * dx_in + dy_in * dy_in <= 1.0 and 0.33 <= ny <= 0.67:
+                    in_d_inner = True
+            elif in_d_outer and 0.33 <= nx <= 0.35 and 0.33 <= ny <= 0.67:
+                in_d_inner = True
                 
-            dist_dot = math.sqrt((x - dot_cx)**2 + (y - dot_cy)**2)
-            if dist_dot <= dot_radius:
-                if dist_dot <= dot_radius * 0.35:
-                    col = c_white
-                else:
-                    col = c_amber
-            elif dist_dot <= dot_radius + 1.2:
-                col = c_bg_top
+            if in_d_outer and not in_d_inner:
+                col = c_white
+                
+            # --- Render del punto '.' (Azul Cobalto) ---
+            # Círculo o cuadrado con esquinas redondeadas
+            dot_cx = 0.73
+            dot_cy = 0.72
+            dot_r = 0.075
+            dist_dot = math.sqrt(((nx - dot_cx) * width)**2 + ((ny - dot_cy) * height)**2)
+            if dist_dot <= dot_r * width:
+                col = c_dot
                 
             row.append(col)
         pixels.append(row)
@@ -160,7 +144,7 @@ def save_bmp_24(pixels, width, height, path):
 def save_ico(sizes, path):
     images_data = []
     for w, h in sizes:
-        pix = render_datiolabs_icon(w, h)
+        pix = render_d_icon(w, h)
         png_data = make_png(w, h, pix)
         images_data.append((w, h, png_data))
 
@@ -182,30 +166,23 @@ def save_ico(sizes, path):
         f.write(entries)
         f.write(data_block)
 
-def render_banner(width, height, is_welcome=False):
+def render_header_bmp():
+    # Header de NSIS: 150x57 con fondo blanco/gris elegante, icono 'D.' a la derecha
+    width = 150
+    height = 57
     pixels = []
-    c_bg_top = (15, 23, 42, 255)
-    c_bg_bottom = (30, 41, 59, 255)
-    
-    if is_welcome:
-        icon_size = 140
-        off_x = 25
-        off_y = int((height - icon_size) / 2)
-    else:
-        icon_size = 44
-        off_x = 8
-        off_y = int((height - icon_size) / 2)
-        
-    icon_pix = render_datiolabs_icon(icon_size, icon_size)
+    icon_dim = 42
+    icon_pix = render_d_icon(icon_dim, icon_dim)
+    off_x = width - icon_dim - 10
+    off_y = int((height - icon_dim) / 2)
     
     for y in range(height):
         row = []
-        ny = y / height
         for x in range(width):
-            base_col = blend(c_bg_top, c_bg_bottom, ny)
+            base_col = (255, 255, 255, 255)
             ix = x - off_x
             iy = y - off_y
-            if 0 <= ix < icon_size and 0 <= iy < icon_size:
+            if 0 <= ix < icon_dim and 0 <= iy < icon_dim:
                 p = icon_pix[iy][ix]
                 if p[3] > 0:
                     alpha = p[3] / 255.0
@@ -219,28 +196,29 @@ def render_banner(width, height, is_welcome=False):
     return pixels
 
 if __name__ == '__main__':
+    # 1. icon.ico multi-resolución
     save_ico([(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)], '/home/ec2-user/apex/datiolabs-ui/icons/icon.ico')
     
-    pix_512 = render_datiolabs_icon(512, 512)
+    # 2. icon.png 512x512
+    pix_512 = render_d_icon(512, 512)
     with open('/home/ec2-user/apex/datiolabs-ui/icons/icon.png', 'wb') as f:
         f.write(make_png(512, 512, pix_512))
         
-    pix_header = render_banner(150, 57, is_welcome=False)
+    # 3. header.bmp (150x57)
+    pix_header = render_header_bmp()
     save_bmp_24(pix_header, 150, 57, '/home/ec2-user/apex/datiolabs-ui/icons/header.bmp')
     
-    pix_welcome = render_banner(498, 312, is_welcome=True)
-    save_bmp_24(pix_welcome, 498, 312, '/home/ec2-user/apex/datiolabs-ui/icons/welcome.bmp')
-    
+    # 4. Favicon SVG exacto con 'D.'
     svg_content = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
   <rect width="64" height="64" rx="14" fill="#0F172A" stroke="#334155" stroke-width="2"/>
-  <polygon points="31,14 49,24 31,34 13,24" fill="#38BDF8"/>
-  <polygon points="13,24 31,34 31,52 13,42" fill="#2563EB"/>
-  <polygon points="31,34 49,24 49,42 31,52" fill="#1D4ED8"/>
-  <circle cx="51" cy="18" r="5" fill="#F59E0B" stroke="#0F172A" stroke-width="1.5"/>
+  <!-- Letra D blanca -->
+  <path d="M18 16 H34 C44 16 48 23 48 32 C48 41 44 48 34 48 H18 Z M26 24 V40 H33 C39 40 40 37 40 32 C40 27 39 24 33 24 Z" fill="#FFFFFF"/>
+  <!-- Punto azul corporativo -->
+  <circle cx="51" cy="45" r="4.5" fill="#2563EB"/>
 </svg>'''
     with open('/home/ec2-user/apex/ui/public/favicon.svg', 'w') as f:
         f.write(svg_content)
     with open('/home/ec2-user/apex/ui/public/descargas/favicon.svg', 'w') as f:
         f.write(svg_content)
 
-    print("Iconos e identidades visuales DatioLabs generados con exito.")
+    print("Isotipo D. e identidades visuales generados con exito.")

@@ -1,6 +1,6 @@
 [package]
 name = "datiolabs-ui"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 
 [lib]
@@ -8,7 +8,7 @@ name = "datiolabs_ui_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
-datiolabs-core = { version = "0.1.0", path = "../datiolabs-core" }
+datiolabs-core = { version = "1.0.0", path = "../datiolabs-core" }
 rust_decimal = { version = "1.40.0", features = ["serde"] }
 rust_decimal_macros = "1.40.0"
 serde = { version = "1.0.228", features = ["derive"] }
