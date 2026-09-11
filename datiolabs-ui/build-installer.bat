@@ -83,19 +83,43 @@ if %SKIP_FRONTEND%==0 (
 )
 echo.
 
-REM Build Tauri
-echo Building Tauri app...
+REM Build Backend
+echo Compilando ejecutable de Windows...
 if %CLEAN%==1 (
     echo Limpiando builds anteriores...
     cargo clean
 )
-set TAURI_VERSION=%VERSION%
-cargo tauri build --target x86_64-pc-windows-msvc
-
-set INSTALLER=target\release\bundle\nsis\DatioLabs Retail_%VERSION%_x64-setup.exe
-if not exist "%INSTALLER%" (
-    set INSTALLER=target\release\bundle\nsis\DatioLabs_Retail_%VERSION%_x64-setup.exe
+cargo build --release --bin datiolabs-ui
+if errorlevel 1 (
+    echo ERROR: Compilacion del backend fallo
+    exit /b 1
 )
+
+REM Preparar directorio app para NSIS
+echo Empaquetando archivos de distribucion...
+if exist "app" rmdir /s /q "app"
+mkdir "app"
+copy /y "..\target\release\datiolabs-ui.exe" "app\DatioLabs.exe" >nul
+if not exist "app\DatioLabs.exe" (
+    echo ERROR: DatioLabs.exe no encontrado en target\release
+    exit /b 1
+)
+
+REM Ejecutar compilador NSIS
+echo Generando instalador ejecutable con NSIS...
+where makensis >nul 2>&1
+if not errorlevel 1 (
+    makensis installer.nsi
+) else if exist "C:\Program Files (x86)\NSIS\makensis.exe" (
+    "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
+) else if exist "C:\Program Files\NSIS\makensis.exe" (
+    "C:\Program Files\NSIS\makensis.exe" installer.nsi
+) else (
+    echo ERROR: makensis.exe no encontrado para empaquetar
+    exit /b 1
+)
+
+set INSTALLER=DatioLabs_Retail_%VERSION%_x64-setup.exe
 if not exist "%INSTALLER%" (
     echo ERROR: Instalador no generado
     exit /b 1

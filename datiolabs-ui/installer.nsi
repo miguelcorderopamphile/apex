@@ -8,14 +8,21 @@
 !define PRODUCT_DIR_REGKEY "Software\Microsoft\Windows\CurrentVersion\App Paths\DatioLabs.exe"
 !define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\DatioLabs"
 !define PRODUCT_UNINST_ROOT_KEY "HKCU"
+!define OUT_FILE "DatioLabs_Retail_${PRODUCT_VERSION}_x64-setup.exe"
+
+OutFile "${OUT_FILE}"
 
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 !include "LogicLib.nsh"
 
 ; Modern UI settings - minimal pages
-!define MUI_ICON "icons/icon.ico"
-!define MUI_UNICON "icons/icon.ico"
+!define MUI_ICON "icons\icon.ico"
+!define MUI_UNICON "icons\icon.ico"
+!define MUI_HEADERIMAGE
+!define MUI_HEADERIMAGE_BITMAP "icons\header.bmp"
+!define MUI_WELCOMEFINISHPAGE_BITMAP "icons\welcome.bmp"
+!define MUI_UNWELCOMEFINISHPAGE_BITMAP "icons\welcome.bmp"
 !define MUI_WELCOMEPAGE
 !define MUI_DIRECTORYPAGE
 !define MUI_INSTFILESPAGE
@@ -65,7 +72,6 @@ Page custom SeleccionModoPage ValidarSeleccionModoPage
 !insertmacro MUI_LANGUAGE "Spanish"
 
 ; Variables
-Var StartMenuFolder
 Var ModoDialog
 Var RadioNuevo
 Var RadioRespaldo
@@ -128,10 +134,9 @@ Section "MainSection" SEC01
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\App Paths\DatioLabs.exe" "Path" "$INSTDIR"
   
   ; Start Menu shortcuts
-  ${GetFolderPath} $StartMenuFolder "CSIDL_PROGRAMS"
-  CreateDirectory "$StartMenuFolder\DatioLabs"
-  CreateShortcut "$StartMenuFolder\DatioLabs\DatioLabs Retail.lnk" "$INSTDIR\DatioLabs.exe"
-  CreateShortcut "$StartMenuFolder\DatioLabs\Desinstalar.lnk" "$INSTDIR\uninstall.exe"
+  CreateDirectory "$SMPROGRAMS\DatioLabs"
+  CreateShortcut "$SMPROGRAMS\DatioLabs\DatioLabs Retail.lnk" "$INSTDIR\DatioLabs.exe"
+  CreateShortcut "$SMPROGRAMS\DatioLabs\Desinstalar.lnk" "$INSTDIR\uninstall.exe"
   
   ; Desktop shortcut
   CreateShortcut "$DESKTOP\DatioLabs Retail.lnk" "$INSTDIR\DatioLabs.exe"
@@ -145,15 +150,17 @@ Function .onInit
   ; Single instance check
   ${GetParameters} $0
   ${GetOptions} $0 "/S" $1
-  StrCmp $1 "" 0 +2
-  MessageBox MB_ICONEXCLAMATION|MB_OK "El instalador ya se está ejecutando." IDOK Abort
+  StrCmp $1 "" 0 +3
+  MessageBox MB_ICONEXCLAMATION|MB_OK "El instalador ya se está ejecutando."
+  Abort
 FunctionEnd
 
 Function un.onInit
   ; Check if app is running
   FindWindow $0 "DatioLabs Retail"
   ${If} $0 != 0
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Cierre DatioLabs Retail antes de desinstalar." IDOK Abort
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Cierre DatioLabs Retail antes de desinstalar."
+    Abort
   ${EndIf}
 FunctionEnd
 
@@ -163,20 +170,30 @@ Function un.onUninstSuccess
 FunctionEnd
 
 Section Uninstall
-  ; Remove files
+  ; 1. Detener procesos huérfanos o en ejecución
+  nsExec::Exec 'taskkill /F /IM DatioLabs.exe'
+
+  ; 2. Preguntar al usuario si desea eliminar también la base de datos y configuraciones
+  MessageBox MB_YESNO|MB_ICONQUESTION "¿Desea eliminar también la base de datos local y todos los datos del negocio?$\n$\nSeleccione 'Sí' para una desinstalación 100% limpia y completa.$\nSeleccione 'No' si desea conservar sus datos para una futura reinstalación." IDNO ConservarDatos
+
+  ; Purgar datos de usuario, base de datos Sled, cachés y WebView2
+  RMDir /r "$LOCALAPPDATA\DatioLabs"
+  RMDir /r "$APPDATA\com.datiolabs.retail"
+  RMDir /r "$LOCALAPPDATA\com.datiolabs.retail"
+  RMDir /r "$LOCALAPPDATA\datiolabs_db"
+
+ConservarDatos:
+  ; 3. Eliminar archivos de la aplicación
   RMDir /r "$INSTDIR"
   
-  ; Remove shortcuts
+  ; 4. Eliminar accesos directos
   Delete "$DESKTOP\DatioLabs Retail.lnk"
-  ${GetFolderPath} $StartMenuFolder "CSIDL_PROGRAMS"
-  RMDir /r "$StartMenuFolder\DatioLabs"
+  RMDir /r "$SMPROGRAMS\DatioLabs"
   
-  ; Remove registry
+  ; 5. Eliminar entradas del registro de Windows
   DeleteRegKey HKCU "${PRODUCT_UNINST_KEY}"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\App Paths\DatioLabs.exe"
-  
-  ; Remove app data (optional - keep user data)
-  ; RMDir /r "$LOCALAPPDATA\DatioLabs"
+  DeleteRegKey HKCU "Software\DatioLabs"
 SectionEnd
 
 ; Fast installation - no unnecessary operations
