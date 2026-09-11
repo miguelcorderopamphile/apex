@@ -17,8 +17,8 @@ export class GuiaView {
             </span>
         </div>
 
-        <!-- Tarjetas Resumen de los 6 Modulos -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
+        <!-- Tarjetas Resumen de los 5 Modulos -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 mb-6">
             <div class="border-2 border-brand-black rounded-lg bg-amber-50 p-3.5 shadow-brutal-sm">
                 <span class="font-mono text-[10px] font-black text-amber-900 uppercase">MODULO 01</span>
                 <h4 class="font-heading font-black text-base mt-0.5">CAJA</h4>
@@ -43,11 +43,6 @@ export class GuiaView {
                 <span class="font-mono text-[10px] font-black text-gray-800 uppercase">MODULO 05</span>
                 <h4 class="font-heading font-black text-base mt-0.5">PANEL</h4>
                 <p class="text-xs text-gray-700 mt-1">Diagnostico financiero por fechas, grafico SVG, semaforo de stock, respaldos criptograficos y PIN.</p>
-            </div>
-            <div class="border-2 border-brand-black rounded-lg bg-purple-50 p-3.5 shadow-brutal-sm">
-                <span class="font-mono text-[10px] font-black text-purple-900 uppercase">MODULO 06</span>
-                <h4 class="font-heading font-black text-base mt-0.5">ACCESO REMOTO</h4>
-                <p class="text-xs text-gray-700 mt-1">Conexion P2P por QR, bootstrap para movil, WebRTC DataChannel y sincronizacion en tiempo real.</p>
             </div>
         </div>
 
@@ -270,43 +265,6 @@ export class GuiaView {
                     <div class="border border-brand-black rounded p-3 bg-slate-50">
                         <strong class="text-brand-black block font-heading font-black mb-1">Seguridad y PIN</strong>
                         Cambio o eliminacion de clave del Panel. Campo "vacio = sin clave". Indicador de estado "Protegido" con descripcion de seguridad.
-                    </div>
-                </div>
-            </div>
-
-            <!-- ============ MODULO 6: ACCESO REMOTO / P2P ============ -->
-            <div class="bg-white border-2 border-brand-black rounded-lg shadow-brutal p-6">
-                <div class="flex items-center gap-3 border-b-2 border-brand-black pb-3 mb-4">
-                    <span class="w-8 h-8 rounded-full bg-brand-black text-white font-black font-heading flex items-center justify-center text-sm">6</span>
-                    <div>
-                        <h3 class="font-heading font-black text-lg sm:text-xl">Acceso Remoto: P2P, QR y Bootstrap Movil</h3>
-                        <p class="text-xs text-gray-500 font-bold">Conexion directa desktop-movil via WebRTC DataChannel sin servidores centrales de datos</p>
-                    </div>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs font-body leading-relaxed text-gray-700">
-                    <div class="border border-brand-black rounded p-3 bg-purple-50">
-                        <strong class="text-brand-black block font-heading font-black mb-1">Generacion de QR</strong>
-                        El dueno genera un QR desde el Panel que contiene la IP del desktop, el puerto (4000) y un room ID unico. El QR apunta a /bootstrap.
-                    </div>
-                    <div class="border border-brand-black rounded p-3 bg-blue-50">
-                        <strong class="text-brand-black block font-heading font-black mb-1">Bootstrap para Movil</strong>
-                        Pagina minimalista (3KB) que se carga en el navegador del movil: conecta al servidor de senalizacion, establece DataChannel y descarga la SPA completa por P2P.
-                    </div>
-                    <div class="border border-brand-black rounded p-3 bg-emerald-50">
-                        <strong class="text-brand-black block font-heading font-black mb-1">WebRTC DataChannel</strong>
-                        Canales de datos ordenados para comandos API. El desktop proxea las llamadas HTTP del movil con la sesion autenticada del dueno.
-                    </div>
-                    <div class="border border-brand-black rounded p-3 bg-amber-50">
-                        <strong class="text-brand-black block font-heading font-black mb-1">Reconexion Automatica</strong>
-                        Backoff exponencial (1s a 30s), ICE restart automatico, keepalive ping/pong cada 20s y reconstruccion completa del PeerConnection.
-                    </div>
-                    <div class="border border-brand-black rounded p-3 bg-red-50">
-                        <strong class="text-brand-black block font-heading font-black mb-1">Servidor de Senalizacion</strong>
-                        Cloudflare Worker con Durable Objects (SQLite-backed) para emparejamiento de peers. Elimina volatilidad de globalThis._wsMap.
-                    </div>
-                    <div class="border border-brand-black rounded p-3 bg-gray-50">
-                        <strong class="text-brand-black block font-heading font-black mb-1">Fallback HTTP y Demo</strong>
-                        Invocar() tiene 4 niveles: Tauri, DataChannel, HTTP (Axum local) y Mock (demo Cloudflare Pages). El sistema degrada graceful sin conexion.
                     </div>
                 </div>
             </div>

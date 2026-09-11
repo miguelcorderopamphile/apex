@@ -21,7 +21,6 @@ interface TauriBridge {
 declare global {
     interface Window {
         __TAURI__?: TauriBridge;
-        __DATACHANNEL__?: RTCDataChannel;
     }
 }
 
@@ -940,38 +939,10 @@ export async function invocar<T>(comando: string, args?: Record<string, unknown>
         }
     }
 
-    const dc = window.__DATACHANNEL__;
-    if (dc && dc.readyState === 'open') {
-        const dcResult = await dcInvocar<T>(dc, comando, args).catch(() => null);
-        if (dcResult !== null) return dcResult;
-    }
-
     const httpResult = await httpInvocar<T>(comando, args).catch(() => null);
     if (httpResult !== null) return httpResult;
 
     return mockInvocar<T>(comando, args);
-}
-
-let dcIdCounter = 0;
-const dcPending = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
-
-function dcInvocar<T>(dc: RTCDataChannel, comando: string, args?: Record<string, unknown>): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-        const id = `dc-${++dcIdCounter}-${Date.now()}`;
-        const timer = setTimeout(() => {
-            dcPending.delete(id);
-            reject(new Error('DataChannel timeout'));
-        }, 15000);
-        dcPending.set(id, { resolve, reject, timer });
-        (window as any).__P2P_PENDING__ = dcPending;
-        try {
-            dc.send(JSON.stringify({ id, comando, args }));
-        } catch (e) {
-            clearTimeout(timer);
-            dcPending.delete(id);
-            reject(e instanceof Error ? e : new Error(String(e)));
-        }
-    });
 }
 
 async function httpInvocar<T>(comando: string, args?: Record<string, unknown>): Promise<T | null> {
@@ -1738,13 +1709,6 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
             const esperado = digitos[12] * 1000 + digitos[13] * 100 + digitos[14] * 10 + digitos[15];
             return Promise.resolve((checksum === esperado) as unknown as T);
         }
-        case 'generar_qr_panel': {
-            const roomId = 'room-' + Math.random().toString(36).slice(2, 10);
-            const signalingBase = (window as any).__SIGNALING_URL__
-                || 'https://datiolabs-signaling.apex-importvcb.workers.dev';
-            const url = `${signalingBase}/ws/signaling?room=${roomId}`;
-            return Promise.resolve({ url, qrBase64: '', roomId } as unknown as T);
-        }
         case 'obtener_tasa_bcv':
             return Promise.resolve(demoStore.tasaActual as unknown as T);
         case 'forzar_actualizacion_tasa':
@@ -2052,7 +2016,6 @@ export const api = {
         invocar<BackupMetadata>('restaurar_desde_archivo', { contenidoBase64, nombreArchivo }),
     licencia: () => invocar<LicenciaInfo>('obtener_licencia'),
     validarLicencia: (clave: string) => invocar<boolean>('validar_licencia', { clave }),
-    generarQr: () => invocar<{ url: string; qrBase64: string; roomId: string }>('generar_qr_panel'),
     cambiarPinDueno: (pinAnterior: string, pinNuevo: string) =>
         invocar<boolean>('cambiar_pin_dueno', { pinAnterior, pinNuevo }),
     actualizarPrivacidadInventario: (privacidadInventario: boolean) =>

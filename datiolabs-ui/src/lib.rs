@@ -31,8 +31,7 @@ use uuid::Uuid;
 
 use axum::{
     Router,
-    extract::{Request, State, WebSocketUpgrade},
-    extract::ws::{Message as WsMessage, WebSocket},
+    extract::{Request, State},
     http::{
         HeaderMap, HeaderValue, Method, StatusCode,
         header::{COOKIE, SET_COOKIE},
@@ -43,11 +42,10 @@ use axum::{
     routing::{delete, get, post, put},
 };
 use futures::stream::Stream;
-use futures::{SinkExt, StreamExt};
 use rand::Rng;
 use std::collections::HashMap;
 use std::convert::Infallible;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
 
@@ -188,7 +186,6 @@ struct AxumAppState {
     servicio_tasa: Arc<ServicioTasa>,
     session_store: SessionStore,
     tx: broadcast::Sender<()>,
-    signaling: Arc<Mutex<HashMap<String, Vec<(String, mpsc::UnboundedSender<String>)>>>>,
     rate_limiter: RateLimiter,
 }
 
@@ -206,12 +203,18 @@ async fn api_auth_login(
     };
     drop(ledger);
 
+    state
+        .rate_limiter
+        .check_and_record("admin_login")
+        .map_err(|e| (StatusCode::TOO_MANY_REQUESTS, e))?;
+
     if cfg.pin_dueno_sha256.is_empty() {
         return Err((StatusCode::UNAUTHORIZED, "Credenciales inválidas".to_string()));
     }
     if cfg.pin_dueno_sha256 != hash_pin(&payload.pin) {
         return Err((StatusCode::UNAUTHORIZED, "Credenciales inválidas".to_string()));
     }
+    state.rate_limiter.clear("admin_login");
     let token = state
         .session_store
         .create()
@@ -246,10 +249,6 @@ async fn api_auth_logout(
 
 async fn serve_panel_html() -> Html<&'static str> {
     Html(include_str!("../panel.html"))
-}
-
-async fn serve_bootstrap_html() -> Html<&'static str> {
-    Html(include_str!("../bootstrap.html"))
 }
 
 async fn api_spa_content() -> Result<Json<serde_json::Value>, (StatusCode, String)> {
@@ -524,75 +523,6 @@ async fn api_sse_events(
         }
     };
     Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default())
-}
-
-async fn ws_signaling_handler(
-    ws: WebSocketUpgrade,
-    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
-    State(state): State<AxumAppState>,
-) -> Response {
-    let room = params.get("room").cloned().unwrap_or_else(|| "default".to_string());
-    ws.on_upgrade(move |socket| handle_signaling_peer(socket, room, state)).into_response()
-}
-
-async fn handle_signaling_peer(
-    socket: WebSocket,
-    room: String,
-    state: AxumAppState,
-) {
-    let (mut ws_tx, mut ws_rx) = socket.split();
-    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
-    let peer_id = Uuid::new_v4().to_string();
-
-    {
-        if let Ok(mut rooms) = state.signaling.lock() {
-            rooms.entry(room.clone()).or_insert_with(Vec::new).push((peer_id.clone(), tx));
-        }
-    }
-
-    let room_for_remove = room.clone();
-    let state_clone = state.clone();
-    let peer_id_for_recv = peer_id.clone();
-
-    let send_task = tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            if ws_tx.send(WsMessage::Text(msg.into())).await.is_err() {
-                break;
-            }
-        }
-    });
-
-    let recv_task = tokio::spawn(async move {
-        while let Some(Ok(msg)) = ws_rx.next().await {
-            if let WsMessage::Text(text) = msg {
-                let peers = {
-                    let rooms = state_clone.signaling.lock().unwrap_or_else(|e| e.into_inner());
-                    rooms.get(&room).cloned().unwrap_or_default()
-                };
-                for (pid, peer_tx) in &peers {
-                    if pid != &peer_id_for_recv {
-                        let _ = peer_tx.send(text.to_string());
-                    }
-                }
-            }
-        }
-    });
-
-    tokio::select! {
-        _ = send_task => {},
-        _ = recv_task => {},
-    }
-
-    {
-        if let Ok(mut rooms) = state.signaling.lock() {
-            if let Some(peers) = rooms.get_mut(&room_for_remove) {
-                peers.retain(|(pid, p)| pid != &peer_id && !p.is_closed());
-                if peers.is_empty() {
-                    rooms.remove(&room_for_remove);
-                }
-            }
-        }
-    }
 }
 
 async fn api_cuentas(
@@ -3188,74 +3118,6 @@ fn get_lan_ip() -> Result<String, UIError> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct QrData {
-    url: String,
-    qr_base64: String,
-    room_id: String,
-}
-
-#[tauri::command]
-fn generar_qr_panel(state: tauri::State<AppState>) -> Result<QrData, UIError> {
-    // Try external IP from UPnP first, fall back to LAN IP
-    let ip = {
-        let ext = state.external_ip.lock().map_err(|_| UIError::new("error de bloqueo", ""))?;
-        if let Some(ref ip) = *ext {
-            ip.clone()
-        } else {
-            get_lan_ip()?
-        }
-    };
-    let room_id = Uuid::new_v4().to_string();
-    let url = format!("http://{}:{}/bootstrap?room={}", ip, SERVIDOR_PORT, room_id);
-
-    let code = qrcode::QrCode::new(url.as_bytes())
-        .map_err(|e| UIError::new("error generando QR", &e.to_string()))?;
-    let image = code
-        .render::<image::Luma<u8>>()
-        .min_dimensions(256, 256)
-        .dark_color(image::Luma([0x0f]))
-        .light_color(image::Luma([0xff]))
-        .build();
-
-    let mut png_bytes = Vec::new();
-    image
-        .write_to(
-            &mut std::io::Cursor::new(&mut png_bytes),
-            image::ImageFormat::Png,
-        )
-        .map_err(|e| UIError::new("error codificando PNG", &e.to_string()))?;
-
-    use base64::Engine;
-    let qr_base64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
-    Ok(QrData { url, qr_base64, room_id })
-}
-
-#[tauri::command]
-fn abrir_panel_movil(app: tauri::AppHandle) -> Result<(), UIError> {
-    let ip = get_lan_ip()?;
-    let url = format!("http://{}:{}/panel", ip, SERVIDOR_PORT);
-    let webview_url = url
-        .parse::<tauri::Url>()
-        .map_err(|e| UIError::new("error parseando URL", &e.to_string()))?;
-
-    tauri::WebviewWindowBuilder::new(
-        &app,
-        "panel-movil",
-        tauri::WebviewUrl::External(webview_url),
-    )
-    .title("DatioLabs Panel Móvil")
-    .inner_size(400.0, 700.0)
-    .resizable(true)
-    .decorations(true)
-    .always_on_top(false)
-    .build()
-    .map_err(|e| UIError::new("error creando ventana", &e.to_string()))?;
-
-    Ok(())
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 struct BackupMetadataDto {
     version: u32,
     timestamp_unix: i64,
@@ -4155,9 +4017,7 @@ pub fn run() {
                     .route("/api/auth/login", post(api_auth_login))
                     .route("/api/auth/logout", post(api_auth_logout))
                     .route("/api/events", get(api_sse_events))
-                    .route("/ws/signaling", get(ws_signaling_handler))
                     .route("/panel", get(serve_panel_html))
-                    .route("/bootstrap", get(serve_bootstrap_html))
                     .route("/api/spa", get(api_spa_content))
                     .route("/api/config", get(api_config))
                     .fallback_service(ServeDir::new(spa_dist_path).append_index_html_on_directories(false));
@@ -4172,7 +4032,6 @@ pub fn run() {
                         servicio_tasa: servicio_tasa_for_axum,
                         session_store,
                         tx: tx_for_axum,
-                        signaling: Arc::new(Mutex::new(HashMap::new())),
                         rate_limiter: RateLimiter::new(5, 300), // 5 intentos, lockout 5 minutos
                     });
 
@@ -4222,8 +4081,6 @@ pub fn run() {
             api_login,
             api_logout,
             get_lan_ip,
-            generar_qr_panel,
-            abrir_panel_movil,
             exportar_backup,
             importar_backup,
             listar_backups,
