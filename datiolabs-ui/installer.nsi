@@ -147,12 +147,7 @@ Section -Post
 SectionEnd
 
 Function .onInit
-  ; Single instance check
-  ${GetParameters} $0
-  ${GetOptions} $0 "/S" $1
-  StrCmp $1 "" 0 +3
-  MessageBox MB_ICONEXCLAMATION|MB_OK "El instalador ya se está ejecutando."
-  Abort
+  ; Initialization
 FunctionEnd
 
 Function un.onInit
