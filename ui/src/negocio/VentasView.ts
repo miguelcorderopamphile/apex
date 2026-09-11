@@ -135,8 +135,11 @@ export class VentasView {
         this.jornadas = historico;
         this.todosLosTickets = tickets;
 
-        const totalJornadas = (jornadaActual ? 1 : 0) + historico.length;
-        const todasParaKpi = [...(jornadaActual ? [jornadaActual] : []), ...historico];
+        const historicoFiltrado = jornadaActual
+            ? historico.filter((j) => j.id !== jornadaActual.id)
+            : historico;
+        const todasParaKpi = [...(jornadaActual ? [jornadaActual] : []), ...historicoFiltrado];
+        const totalJornadas = todasParaKpi.length;
         const totalUsd = todasParaKpi.reduce((a, j) => a + parseNum(j.ventasTotalUsd), 0);
         const totalTickets = todasParaKpi.reduce((a, j) => a + j.ticketsEmitidos, 0);
 
@@ -201,9 +204,12 @@ export class VentasView {
         const lista = document.getElementById('lista-jornadas');
         if (!lista) return;
 
+        const historicoFiltrado = this.jornadaActual
+            ? this.jornadas.filter((j) => j.id !== this.jornadaActual?.id)
+            : this.jornadas;
         const todas: JornadaLaboral[] = [
             ...(this.jornadaActual ? [this.jornadaActual] : []),
-            ...this.jornadas,
+            ...historicoFiltrado,
         ];
 
         const q = this.busqueda.trim().toLowerCase();

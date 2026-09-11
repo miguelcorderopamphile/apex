@@ -180,7 +180,14 @@ pub struct Producto {
 }
 
 impl Producto {
-    pub fn nuevo_simple(sku: Sku, nombre: Nombre, precio_usd: Decimal, impuesto_pct: Decimal, stock: Decimal, capacidades: u16) -> Self {
+    pub fn nuevo_simple(
+        sku: Sku,
+        nombre: Nombre,
+        precio_usd: Decimal,
+        impuesto_pct: Decimal,
+        stock: Decimal,
+        capacidades: u16,
+    ) -> Self {
         Self {
             sku,
             nombre,
@@ -336,7 +343,11 @@ impl Catalogo {
     /// Stock is clamped to zero minimum — never goes negative.
     pub fn aplicar_delta_stock(&mut self, idx: usize, delta: Decimal) {
         let nuevo = self.stocks[idx] + delta;
-        self.stocks[idx] = if nuevo < Decimal::ZERO { Decimal::ZERO } else { nuevo };
+        self.stocks[idx] = if nuevo < Decimal::ZERO {
+            Decimal::ZERO
+        } else {
+            nuevo
+        };
     }
 
     /// Column scan valuation of the whole inventory in USD.

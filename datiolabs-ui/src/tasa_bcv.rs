@@ -146,7 +146,11 @@ impl ServicioTasa {
             fecha_unix: actual.fecha_unix,
             fluctuacion_pct,
             direccion,
-            fuente: Some(if actual.fuente.is_empty() { "BCV".to_string() } else { actual.fuente.clone() }),
+            fuente: Some(if actual.fuente.is_empty() {
+                "BCV".to_string()
+            } else {
+                actual.fuente.clone()
+            }),
         }
     }
 
@@ -173,7 +177,11 @@ impl ServicioTasa {
                 .write()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             let anterior = guardia.actual.take().map(|a| a.valor);
-            guardia.actual = Some(CacheTasa { valor, fecha_unix, fuente: FUENTE.to_string() });
+            guardia.actual = Some(CacheTasa {
+                valor,
+                fecha_unix,
+                fuente: FUENTE.to_string(),
+            });
             guardia.anterior = anterior;
             guardia.pendiente = None;
         }
@@ -189,7 +197,14 @@ impl ServicioTasa {
             });
         }
 
-        guardar_cache(&self.ruta_cache, &CacheTasa { valor, fecha_unix, fuente: FUENTE.to_string() });
+        guardar_cache(
+            &self.ruta_cache,
+            &CacheTasa {
+                valor,
+                fecha_unix,
+                fuente: FUENTE.to_string(),
+            },
+        );
 
         Ok(self.info_actual())
     }
@@ -273,7 +288,11 @@ impl ServicioTasa {
             });
         }
 
-        let cache = CacheTasa { valor, fecha_unix, fuente: "MANUAL".to_string() };
+        let cache = CacheTasa {
+            valor,
+            fecha_unix,
+            fuente: "MANUAL".to_string(),
+        };
         guardar_cache(&self.ruta_cache, &cache);
 
         {

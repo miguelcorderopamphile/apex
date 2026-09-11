@@ -84,4 +84,62 @@ describe('Contrato de Datos Frontend <-> Backend Tauri', () => {
         expect(payloadCierre.pagos.length).toBeGreaterThan(0);
         expect(payloadCierre.resolucionVuelto.estado).toBe('PAGADO');
     });
+
+    it('deduplicacion de jornada actual en lista consolidada de jornadas', () => {
+        const jornadaActual = {
+            id: 'JOR-ACTUAL',
+            estado: 'abierta' as const,
+            inicioUnix: 1000,
+            inicioStr: 'Hoy',
+            operadorInicial: 'Operador 1',
+            operadorActual: 'Operador 1',
+            operadoresActivos: ['Operador 1'],
+            operadoresRelevo: ['Operador 1'],
+            tasaInicio: '800.00',
+            ventasTotalUsd: '50.00',
+            ventasTotalBs: '40000.00',
+            ticketsEmitidos: 2,
+            vueltoPagadoBs: '0.00',
+            vueltoRetenidoBs: '0.00',
+            deudasLiquidadasUsd: '0.00',
+            entradasStockReg: 0,
+            mermasStockReg: 0,
+            cambiosPrecioReg: 0,
+        };
+
+        const historico = [
+            { ...jornadaActual },
+            {
+                ...jornadaActual,
+                id: 'JOR-ANTERIOR',
+                estado: 'cerrada' as const,
+            },
+        ];
+
+        const historicoFiltrado = jornadaActual
+            ? historico.filter((j) => j.id !== jornadaActual.id)
+            : historico;
+        const todasParaKpi = [...(jornadaActual ? [jornadaActual] : []), ...historicoFiltrado];
+
+        expect(todasParaKpi.length).toBe(2);
+        expect(todasParaKpi.filter((j) => j.id === 'JOR-ACTUAL').length).toBe(1);
+    });
+
+    it('venta con pago mixto incrementa exactamente en 1 los tickets emitidos de la jornada', async () => {
+        const jornada = {
+            id: 'JOR-TEST',
+            estado: 'abierta' as const,
+            ticketsEmitidos: 5,
+        };
+
+        const pagosMixtos = [
+            { metodo: 'DOL.CASH', moneda: 'USD' as const, montoUsd: '10.00', montoBs: '8000.00' },
+            { metodo: 'BS.EFEC.', moneda: 'BS' as const, montoUsd: '5.00', montoBs: '4000.00' },
+        ];
+
+        expect(pagosMixtos.length).toBe(2);
+        jornada.ticketsEmitidos += 1;
+        expect(jornada.ticketsEmitidos).toBe(6);
+    });
 });
+

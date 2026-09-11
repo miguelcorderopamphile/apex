@@ -1,6 +1,6 @@
 use crate::capacidades::ErrorNegocio;
 use crate::models::{
-    Categoria, Catalogo, ConfigNegocio, DispositivoRemoto, EventoTasaBcv, Jornada,
+    Catalogo, Categoria, ConfigNegocio, DispositivoRemoto, EventoTasaBcv, Jornada,
     MetodoPagoConfig, MovimientoStock, Operador, Producto, SemaforoStock, TasaImpuesto, Venta,
 };
 use crate::modulos::panaderia::{LibroLotes, Lote};
@@ -108,9 +108,21 @@ impl Database {
         let tree = self.db.open_tree(ARBOL_TASAS_IMPUESTOS)?;
         if tree.is_empty() {
             let defaults = vec![
-                TasaImpuesto { id: "IVA-0".into(), nombre: "Exento".into(), porcentaje: Decimal::ZERO },
-                TasaImpuesto { id: "IVA-16".into(), nombre: "Regular (16%)".into(), porcentaje: dec!(16) },
-                TasaImpuesto { id: "IVA-8".into(), nombre: "Bajo (8%)".into(), porcentaje: dec!(8) },
+                TasaImpuesto {
+                    id: "IVA-0".into(),
+                    nombre: "Exento".into(),
+                    porcentaje: Decimal::ZERO,
+                },
+                TasaImpuesto {
+                    id: "IVA-16".into(),
+                    nombre: "Regular (16%)".into(),
+                    porcentaje: dec!(16),
+                },
+                TasaImpuesto {
+                    id: "IVA-8".into(),
+                    nombre: "Bajo (8%)".into(),
+                    porcentaje: dec!(8),
+                },
             ];
             for t in &defaults {
                 tree.insert(t.id.as_bytes(), bincode::serialize(t)?)?;
@@ -390,7 +402,11 @@ impl Database {
             Some(bytes) => {
                 let mut producto: Producto = bincode::deserialize(&bytes)?;
                 let nuevo = producto.stock + movimiento.delta;
-                producto.stock = if nuevo < Decimal::ZERO { Decimal::ZERO } else { nuevo };
+                producto.stock = if nuevo < Decimal::ZERO {
+                    Decimal::ZERO
+                } else {
+                    nuevo
+                };
                 tree.insert(movimiento.sku.as_bytes(), bincode::serialize(&producto)?)?;
             }
             None => return Err(DbError::Negocio(ErrorNegocio::ProductoInexistente)),
@@ -668,7 +684,16 @@ impl Database {
                 let file_size = reader.seek(SeekFrom::End(0))?;
                 reader.seek(SeekFrom::Start(0))?;
 
-                let _header: BackupHeader = match bincode::deserialize_from(&mut reader) {
+                let mut len_buf = [0u8; 4];
+                if reader.read_exact(&mut len_buf).is_err() {
+                    continue;
+                }
+                let header_len = u32::from_le_bytes(len_buf) as usize;
+                let mut header_buf = vec![0u8; header_len];
+                if reader.read_exact(&mut header_buf).is_err() {
+                    continue;
+                }
+                let _header: BackupHeader = match bincode::deserialize(&header_buf) {
                     Ok(h) => h,
                     Err(_) => continue,
                 };
@@ -1019,5 +1044,24 @@ mod tests {
         db.guardar_venta(directa).unwrap();
         assert_eq!(db.cuentas_abiertas().unwrap().len(), 1);
         assert_eq!(db.ventas_recientes(10).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn exportar_y_listar_backups() {
+        let db = db_temporal("bck_test");
+        let dir = std::env::temp_dir().join(format!("datio_bck_dir_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let backup_path = dir.join("datio_123456.backup");
+        let backup_path_str = backup_path.to_str().unwrap();
+
+        let meta = db.exportar_backup(backup_path_str).unwrap();
+        assert_eq!(meta.version, 1);
+
+        let lista = db.listar_backups(dir.to_str().unwrap()).unwrap();
+        assert_eq!(lista.len(), 1);
+        assert_eq!(lista[0].timestamp_unix, meta.timestamp_unix);
+        assert_eq!(lista[0].checksum_sha256, meta.checksum_sha256);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

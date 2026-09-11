@@ -1029,9 +1029,14 @@ export class CajaView {
 
             // Confirmar cobro
             let procesandoCobro = false;
-            this.modal.querySelector('#btn-confirmar-cobro')?.addEventListener('click', () => {
+            const btnConf = this.modal.querySelector<HTMLButtonElement>('#btn-confirmar-cobro');
+            btnConf?.addEventListener('click', () => {
                 if (procesandoCobro) return;
                 procesandoCobro = true;
+                if (btnConf) {
+                    btnConf.disabled = true;
+                    btnConf.textContent = 'PROCESANDO COBRO...';
+                }
                 void (async () => {
                     const errEl = this.modal.querySelector<HTMLDivElement>('#cobro-error');
                     try {
@@ -1078,6 +1083,10 @@ export class CajaView {
                         this.modalTicketExito(ticket, totalRecibidoBs);
                     } catch (e) {
                         procesandoCobro = false;
+                        if (btnConf) {
+                            btnConf.disabled = false;
+                            btnConf.textContent = 'CONFIRMAR COBRO';
+                        }
                         if (errEl) {
                             errEl.textContent = e instanceof Error ? e.message.replace(/"/g, '') : String(e);
                             errEl.classList.remove('hidden');

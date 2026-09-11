@@ -193,13 +193,20 @@ async fn api_auth_login(
     State(state): State<AxumAppState>,
     Json(payload): Json<LoginRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let ledger = state
-        .ledger
-        .lock()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let ledger = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
     let cfg = match ledger.cargar_config() {
         Ok(Some(c)) => c,
-        _ => return Err((StatusCode::UNAUTHORIZED, "Credenciales inválidas".to_string())),
+        _ => {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                "Credenciales inválidas".to_string(),
+            ));
+        }
     };
     drop(ledger);
 
@@ -209,17 +216,28 @@ async fn api_auth_login(
         .map_err(|e| (StatusCode::TOO_MANY_REQUESTS, e))?;
 
     if cfg.pin_dueno_sha256.is_empty() {
-        return Err((StatusCode::UNAUTHORIZED, "Credenciales inválidas".to_string()));
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "Credenciales inválidas".to_string(),
+        ));
     }
     if cfg.pin_dueno_sha256 != hash_pin(&payload.pin) {
-        return Err((StatusCode::UNAUTHORIZED, "Credenciales inválidas".to_string()));
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "Credenciales inválidas".to_string(),
+        ));
     }
     state.rate_limiter.clear("admin_login");
-    let token = state
-        .session_store
-        .create()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let cookie = make_cookie_header(&token).ok_or((StatusCode::INTERNAL_SERVER_ERROR, "Error al crear cookie de sesión".to_string()))?;
+    let token = state.session_store.create().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let cookie = make_cookie_header(&token).ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Error al crear cookie de sesión".to_string(),
+    ))?;
     let mut resp = Json(LoginResponse {
         ok: true,
         message: hex_token(&token),
@@ -254,16 +272,26 @@ async fn serve_panel_html() -> Html<&'static str> {
 async fn api_spa_content() -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let html_raw = include_str!("../../ui/dist/index.html");
     let assets_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ui/dist/assets");
-    let js_files = std::fs::read_dir(&assets_path)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error reading assets: {e}")))?;
+    let js_files = std::fs::read_dir(&assets_path).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error reading assets: {e}"),
+        )
+    })?;
     let mut js_url = String::new();
     let mut css_url = String::new();
     for entry in js_files.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        if name.ends_with(".js") { js_url = format!("/assets/{}", name); }
-        if name.ends_with(".css") { css_url = format!("/assets/{}", name); }
+        if name.ends_with(".js") {
+            js_url = format!("/assets/{}", name);
+        }
+        if name.ends_with(".css") {
+            css_url = format!("/assets/{}", name);
+        }
     }
-    let html = html_raw.replace("href=\"assets/", "href=\"/assets/").replace("src=\"assets/", "src=\"/assets/");
+    let html = html_raw
+        .replace("href=\"assets/", "href=\"/assets/")
+        .replace("src=\"assets/", "src=\"/assets/");
     Ok(Json(serde_json::json!({
         "html": html,
         "jsUrl": js_url,
@@ -271,18 +299,28 @@ async fn api_spa_content() -> Result<Json<serde_json::Value>, (StatusCode, Strin
     })))
 }
 
-async fn api_panel(State(state): State<AxumAppState>) -> Result<Json<PanelDto>, (StatusCode, String)> {
-    let ledger = state
-        .ledger
-        .lock()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let catalogo = ledger
-        .cargar_catalogo()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+async fn api_panel(
+    State(state): State<AxumAppState>,
+) -> Result<Json<PanelDto>, (StatusCode, String)> {
+    let ledger = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let catalogo = ledger.cargar_catalogo().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
     let limite = ahora_unix() - 86_400;
-    let ventas = ledger
-        .ventas_recientes(2_000)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let ventas = ledger.ventas_recientes(2_000).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
 
     let mut usd = Decimal::ZERO;
     let mut bs = Decimal::ZERO;
@@ -370,9 +408,12 @@ async fn api_panel(State(state): State<AxumAppState>) -> Result<Json<PanelDto>, 
         }
     }
 
-    let cuentas_todas = ledger
-        .cuentas_abiertas()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let cuentas_todas = ledger.cuentas_abiertas().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
     let abiertas = cuentas_todas.len();
 
     // Financial metrics
@@ -385,51 +426,87 @@ async fn api_panel(State(state): State<AxumAppState>) -> Result<Json<PanelDto>, 
     let ganancia_neta_bs = ganancia_neta_usd * tasa;
 
     // Deudas y dinero en la calle
-    let deudas_abiertas = cuentas_todas.iter()
-        .filter(|v| v.tipo == "deuda")
-        .count();
-    let dinero_en_la_calle_usd: Decimal = cuentas_todas.iter()
+    let deudas_abiertas = cuentas_todas.iter().filter(|v| v.tipo == "deuda").count();
+    let dinero_en_la_calle_usd: Decimal = cuentas_todas
+        .iter()
         .filter(|v| v.tipo == "deuda")
         .map(|v| {
             let total = v.lineas.total_usd();
             let abonos = v.abonos_usd.unwrap_or(Decimal::ZERO);
-            if total > abonos { total - abonos } else { Decimal::ZERO }
+            if total > abonos {
+                total - abonos
+            } else {
+                Decimal::ZERO
+            }
         })
         .sum();
     let dinero_en_la_calle_bs = dinero_en_la_calle_usd * tasa;
 
     // Dinero por categoria
-    let categorias = ledger.listar_categorias()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let categorias = ledger.listar_categorias().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
     let mut mapa_cats: std::collections::HashMap<String, (usize, Decimal, Decimal, Decimal)> =
         std::collections::HashMap::new();
     let mut total_bruto_global: Decimal = Decimal::ZERO;
     for i in 0..catalogo.len() {
-        let cat_id = catalogo.categoria_id(i).unwrap_or_else(|| "cat-general".to_string());
-        let entry = mapa_cats.entry(cat_id.clone()).or_insert((0, Decimal::ZERO, Decimal::ZERO, Decimal::ZERO));
+        let cat_id = catalogo
+            .categoria_id(i)
+            .unwrap_or_else(|| "cat-general".to_string());
+        let entry = mapa_cats.entry(cat_id.clone()).or_insert((
+            0,
+            Decimal::ZERO,
+            Decimal::ZERO,
+            Decimal::ZERO,
+        ));
         entry.0 += 1;
-        let st = if catalogo.sin_stock(i) { Decimal::ZERO } else { catalogo.stock(i) };
-        let bruto_unit = catalogo.precio_bruto_usd(i).unwrap_or(catalogo.precio_usd(i) * rust_decimal_macros::dec!(0.65));
+        let st = if catalogo.sin_stock(i) {
+            Decimal::ZERO
+        } else {
+            catalogo.stock(i)
+        };
+        let bruto_unit = catalogo
+            .precio_bruto_usd(i)
+            .unwrap_or(catalogo.precio_usd(i) * rust_decimal_macros::dec!(0.65));
         let venta_unit = catalogo.precio_usd(i);
         entry.1 += st;
         entry.2 += st * bruto_unit;
         entry.3 += st * venta_unit;
         total_bruto_global += st * bruto_unit;
     }
-    let cat_nombre_map: std::collections::HashMap<String, String> = categorias.iter()
+    let cat_nombre_map: std::collections::HashMap<String, String> = categorias
+        .iter()
         .map(|c| (c.id.clone(), c.nombre.clone()))
         .collect();
-    let mut dinero_por_categoria: Vec<CategoriaDineroBrutoDto> = mapa_cats.into_iter()
+    let mut dinero_por_categoria: Vec<CategoriaDineroBrutoDto> = mapa_cats
+        .into_iter()
         .filter(|(_, (n, _, b, _))| *n > 0 || *b > Decimal::ZERO)
         .map(|(cat_id, (cant_prod, unidades, bruto, venta))| {
-            let nombre = cat_nombre_map.get(&cat_id).cloned().unwrap_or_else(|| "General".to_string());
-            let margen = if venta > bruto { venta - bruto } else { Decimal::ZERO };
+            let nombre = cat_nombre_map
+                .get(&cat_id)
+                .cloned()
+                .unwrap_or_else(|| "General".to_string());
+            let margen = if venta > bruto {
+                venta - bruto
+            } else {
+                Decimal::ZERO
+            };
             let margen_pct = if venta > Decimal::ZERO {
                 format!("{:.1}", margen / venta * rust_decimal_macros::dec!(100))
-            } else { "0.0".to_string() };
+            } else {
+                "0.0".to_string()
+            };
             let pct_cap = if total_bruto_global > Decimal::ZERO {
-                format!("{:.1}", bruto / total_bruto_global * rust_decimal_macros::dec!(100))
-            } else { "0.0".to_string() };
+                format!(
+                    "{:.1}",
+                    bruto / total_bruto_global * rust_decimal_macros::dec!(100)
+                )
+            } else {
+                "0.0".to_string()
+            };
             CategoriaDineroBrutoDto {
                 categoria_id: cat_id,
                 nombre,
@@ -468,7 +545,9 @@ async fn api_panel(State(state): State<AxumAppState>) -> Result<Json<PanelDto>, 
     }))
 }
 
-async fn api_tasa(State(state): State<AxumAppState>) -> Result<Json<TasaInfo>, (StatusCode, String)> {
+async fn api_tasa(
+    State(state): State<AxumAppState>,
+) -> Result<Json<TasaInfo>, (StatusCode, String)> {
     Ok(Json(state.servicio_tasa.info_actual()))
 }
 
@@ -478,7 +557,9 @@ async fn api_tasa_pendiente(
     Ok(Json(state.servicio_tasa.tasa_pendiente()))
 }
 
-async fn api_tasa_aplicar(State(state): State<AxumAppState>) -> Result<Json<TasaInfo>, (StatusCode, String)> {
+async fn api_tasa_aplicar(
+    State(state): State<AxumAppState>,
+) -> Result<Json<TasaInfo>, (StatusCode, String)> {
     let result = state
         .servicio_tasa
         .aplicar_tasa_pendiente()
@@ -528,26 +609,36 @@ async fn api_sse_events(
 async fn api_cuentas(
     State(state): State<AxumAppState>,
 ) -> Result<Json<Vec<CuentaDto>>, (StatusCode, String)> {
-    let ledger = state
-        .ledger
-        .lock()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let cuentas = ledger
-        .cuentas_abiertas()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let ledger = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let cuentas = ledger.cuentas_abiertas().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
     Ok(Json(cuentas.iter().map(cuenta_dto).collect()))
 }
 
 async fn api_productos(
     State(state): State<AxumAppState>,
 ) -> Result<Json<Vec<ProductoDto>>, (StatusCode, String)> {
-    let ledger = state
-        .ledger
-        .lock()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let catalogo = ledger
-        .cargar_catalogo()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let ledger = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let catalogo = ledger.cargar_catalogo().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
     let filas = (0..catalogo.len())
         .map(|i| ProductoDto {
             sku: catalogo.sku_obj(i),
@@ -582,7 +673,12 @@ async fn api_cuentas_abrir(
     let tipo = body.get("tipo").cloned();
     let cliente = body.get("cliente").cloned();
     let nota = body.get("nota").cloned();
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
     let tasa = state.servicio_tasa.info_actual().valor;
     let venta = datiolabs_core::models::Venta {
         id: uuid::Uuid::new_v4().to_string(),
@@ -609,7 +705,12 @@ async fn api_cuentas_abrir(
         abonos_usd: Some(rust_decimal::Decimal::ZERO),
         abonos_bs: Some(rust_decimal::Decimal::ZERO),
     };
-    let guardada = db.guardar_venta(venta).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let guardada = db.guardar_venta(venta).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ventaId": guardada.id })))
@@ -621,26 +722,55 @@ async fn api_cuentas_consumo(
     Json(body): Json<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let sku = body.get("sku").cloned().unwrap_or_default();
-    let cantidad = body.get("cantidad").cloned().unwrap_or_else(|| "1".to_string());
-    let modo = body.get("modo_venta").cloned().unwrap_or_else(|| "unidad".to_string());
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let mut venta = db.cargar_venta(&id).ok().flatten()
+    let cantidad = body
+        .get("cantidad")
+        .cloned()
+        .unwrap_or_else(|| "1".to_string());
+    let modo = body
+        .get("modo_venta")
+        .cloned()
+        .unwrap_or_else(|| "unidad".to_string());
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let mut venta = db
+        .cargar_venta(&id)
+        .ok()
+        .flatten()
         .filter(|v| v.es_cuenta_abierta && v.estado == datiolabs_core::models::EstadoVenta::Abierta)
         .ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
-    let catalogo = db.cargar_catalogo().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let idx = catalogo.indice_de(&sku).ok_or((StatusCode::BAD_REQUEST, "SKU inválido".to_string()))?;
-    let cant: rust_decimal::Decimal = cantidad.parse().map_err(|e| (StatusCode::BAD_REQUEST, format!("Cantidad inválida: {e}")))?;
+    let catalogo = db.cargar_catalogo().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let idx = catalogo
+        .indice_de(&sku)
+        .ok_or((StatusCode::BAD_REQUEST, "SKU inválido".to_string()))?;
+    let cant: rust_decimal::Decimal = cantidad
+        .parse()
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Cantidad inválida: {e}")))?;
     let cant_unidades = if modo == "paquete" && catalogo.es_caja(idx) {
         cant * rust_decimal::Decimal::from(catalogo.unidades_por_caja(idx).unwrap_or(1))
     } else {
         cant
     };
-    validar_linea(catalogo.capacidades(idx), cant_unidades, catalogo.stock(idx))
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("{e}")))?;
+    validar_linea(
+        catalogo.capacidades(idx),
+        cant_unidades,
+        catalogo.stock(idx),
+    )
+    .map_err(|e| (StatusCode::BAD_REQUEST, format!("{e}")))?;
     let tasa = state.servicio_tasa.info_actual().valor;
     let sku_obj = catalogo.sku_obj(idx);
     let precio_efectivo = if modo == "paquete" {
-        catalogo.precio_paquete_usd(idx).unwrap_or(catalogo.precio_usd(idx))
+        catalogo
+            .precio_paquete_usd(idx)
+            .unwrap_or(catalogo.precio_usd(idx))
     } else {
         catalogo.precio_usd(idx)
     };
@@ -648,13 +778,26 @@ async fn api_cuentas_consumo(
         venta.lineas.cantidades[pos] += cant;
     } else {
         venta.lineas.agregar(
-            sku_obj, catalogo.nombre_obj(idx),
-            cant, precio_efectivo, tasa, modo.clone(),
+            sku_obj,
+            catalogo.nombre_obj(idx),
+            cant,
+            precio_efectivo,
+            tasa,
+            modo.clone(),
         );
     }
-    descontar_con_lotes_interno(&*db, &catalogo, idx, cant, &venta.id, &modo)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    db.guardar_venta(venta).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    descontar_con_lotes_interno(&*db, &catalogo, idx, cant, &venta.id, &modo).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    db.guardar_venta(venta).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -664,8 +807,16 @@ async fn api_cuentas_eliminar_consumo(
     State(state): State<AxumAppState>,
     Path((id, idx)): Path<(String, usize)>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let mut venta = db.cargar_venta(&id).ok().flatten()
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let mut venta = db
+        .cargar_venta(&id)
+        .ok()
+        .flatten()
         .filter(|v| v.es_cuenta_abierta && v.estado == datiolabs_core::models::EstadoVenta::Abierta)
         .ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
     if idx >= venta.lineas.skus.len() {
@@ -679,13 +830,21 @@ async fn api_cuentas_eliminar_consumo(
     venta.lineas.precios_usd.remove(idx);
     venta.lineas.tasas_bloqueadas.remove(idx);
     // Restaurar stock si el producto controla inventario
-    let tree_p = db.inner_db().open_tree("productos")
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let sin_stock = tree_p.get(sku_removed.as_bytes())
-        .ok().flatten()
-        .and_then(|v| bincode::deserialize::<datiolabs_core::models::Producto>(&v)
-            .or_else(|_| serde_json::from_slice::<datiolabs_core::models::Producto>(&v))
-            .ok())
+    let tree_p = db.inner_db().open_tree("productos").map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let sin_stock = tree_p
+        .get(sku_removed.as_bytes())
+        .ok()
+        .flatten()
+        .and_then(|v| {
+            bincode::deserialize::<datiolabs_core::models::Producto>(&v)
+                .or_else(|_| serde_json::from_slice::<datiolabs_core::models::Producto>(&v))
+                .ok()
+        })
         .map(|p| p.sin_stock)
         .unwrap_or(false);
     if !sin_stock {
@@ -698,10 +857,19 @@ async fn api_cuentas_eliminar_consumo(
             fecha_unix: ahora_unix(),
             firma_sha256: String::new(),
         };
-        db.aplicar_movimiento(mov, |_, _| {})
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+        db.aplicar_movimiento(mov, |_, _| {}).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error interno: {e}"),
+            )
+        })?;
     }
-    db.guardar_venta(venta).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    db.guardar_venta(venta).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -714,18 +882,34 @@ async fn api_cuentas_abonar(
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let usd = body.get("montoUsd").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let bs = body.get("montoBs").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let mut venta = db.cargar_venta(&id).ok().flatten()
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let mut venta = db
+        .cargar_venta(&id)
+        .ok()
+        .flatten()
         .filter(|v| v.es_cuenta_abierta && v.estado == datiolabs_core::models::EstadoVenta::Abierta)
         .ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
     if venta.lineas.skus.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "No se puede abonar a una cuenta sin productos".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "No se puede abonar a una cuenta sin productos".to_string(),
+        ));
     }
     let usd_d = rust_decimal::Decimal::try_from(usd).unwrap_or(rust_decimal::Decimal::ZERO);
     let bs_d = rust_decimal::Decimal::try_from(bs).unwrap_or(rust_decimal::Decimal::ZERO);
     venta.abonos_usd = Some(venta.abonos_usd.unwrap_or(rust_decimal::Decimal::ZERO) + usd_d);
     venta.abonos_bs = Some(venta.abonos_bs.unwrap_or(rust_decimal::Decimal::ZERO) + bs_d);
-    db.guardar_venta(venta).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    db.guardar_venta(venta).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -736,24 +920,52 @@ async fn api_cuentas_cerrar(
     Path(id): Path<String>,
     Json(body): Json<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let recibido = body.get("montoRecibidoBs").and_then(|v| v.parse::<rust_decimal::Decimal>().ok()).unwrap_or(rust_decimal::Decimal::ZERO);
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let mut venta = db.cargar_venta(&id).ok().flatten()
+    let recibido = body
+        .get("montoRecibidoBs")
+        .and_then(|v| v.parse::<rust_decimal::Decimal>().ok())
+        .unwrap_or(rust_decimal::Decimal::ZERO);
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let mut venta = db
+        .cargar_venta(&id)
+        .ok()
+        .flatten()
         .filter(|v| v.es_cuenta_abierta && v.estado == datiolabs_core::models::EstadoVenta::Abierta)
         .ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
     let total_bruto_usd = venta.lineas.total_usd();
     let abonos_usd = venta.abonos_usd.unwrap_or(rust_decimal::Decimal::ZERO);
-    let total_neto_usd = if abonos_usd > total_bruto_usd { rust_decimal::Decimal::ZERO } else { total_bruto_usd - abonos_usd };
+    let total_neto_usd = if abonos_usd > total_bruto_usd {
+        rust_decimal::Decimal::ZERO
+    } else {
+        total_bruto_usd - abonos_usd
+    };
     let tasa = state.servicio_tasa.info_actual().valor;
-    let total_neto_bs = if tasa > rust_decimal::Decimal::ZERO { total_neto_usd * tasa } else { venta.lineas.total_bs() };
+    let total_neto_bs = if tasa > rust_decimal::Decimal::ZERO {
+        total_neto_usd * tasa
+    } else {
+        venta.lineas.total_bs()
+    };
     let es_deuda = venta.tipo == "deuda";
     venta.estado = datiolabs_core::models::EstadoVenta::Cerrada;
     venta.total_usd = total_neto_usd;
     venta.total_bs = total_neto_bs;
     venta.monto_recibido_bs = recibido;
-    venta.vuelto_bs = if recibido > total_neto_bs { recibido - total_neto_bs } else { rust_decimal::Decimal::ZERO };
+    venta.vuelto_bs = if recibido > total_neto_bs {
+        recibido - total_neto_bs
+    } else {
+        rust_decimal::Decimal::ZERO
+    };
     venta.fecha_cierre_unix = ahora_unix();
-    let cerrada = db.guardar_venta(venta).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let cerrada = db.guardar_venta(venta).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
 
     if abonos_usd > total_bruto_usd {
         let excedente = abonos_usd - total_bruto_usd;
@@ -785,7 +997,10 @@ async fn api_cuentas_cerrar(
             firma_sha256: String::new(),
             tipo: "saldo_a_favor".to_string(),
             cliente: cerrada.cliente.clone(),
-            nota: Some(format!("Saldo a favor de ${:.2} generado al cerrar {}", excedente, cerrada.id)),
+            nota: Some(format!(
+                "Saldo a favor de ${:.2} generado al cerrar {}",
+                excedente, cerrada.id
+            )),
             abonos_usd: None,
             abonos_bs: None,
         };
@@ -813,32 +1028,91 @@ async fn api_productos_crear(
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let sku = body.get("sku").and_then(|v| v.as_str()).unwrap_or("");
     let nombre = body.get("nombre").and_then(|v| v.as_str()).unwrap_or("");
-    let precio = body.get("precioUsd").and_then(|v| v.as_str()).and_then(|s| s.parse::<rust_decimal::Decimal>().ok()).unwrap_or(rust_decimal::Decimal::ZERO);
-    let impuesto = body.get("impuestoPct").and_then(|v| v.as_str()).and_then(|s| s.parse::<rust_decimal::Decimal>().ok()).unwrap_or(rust_decimal::Decimal::ZERO);
-    let stock = body.get("stockInicial").and_then(|v| v.as_str()).and_then(|s| s.parse::<rust_decimal::Decimal>().ok()).unwrap_or(rust_decimal::Decimal::ZERO);
-    let caps = body.get("capacidades").and_then(|v| v.as_u64()).unwrap_or(1) as u16;
+    let precio = body
+        .get("precioUsd")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<rust_decimal::Decimal>().ok())
+        .unwrap_or(rust_decimal::Decimal::ZERO);
+    let impuesto = body
+        .get("impuestoPct")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<rust_decimal::Decimal>().ok())
+        .unwrap_or(rust_decimal::Decimal::ZERO);
+    let stock = body
+        .get("stockInicial")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<rust_decimal::Decimal>().ok())
+        .unwrap_or(rust_decimal::Decimal::ZERO);
+    let caps = body
+        .get("capacidades")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1) as u16;
     if sku.is_empty() || nombre.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "SKU y nombre son requeridos".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "SKU y nombre son requeridos".to_string(),
+        ));
     }
     if precio <= rust_decimal::Decimal::ZERO {
-        return Err((StatusCode::BAD_REQUEST, "El precio debe ser mayor a cero".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "El precio debe ser mayor a cero".to_string(),
+        ));
     }
     let p = datiolabs_core::models::Producto {
-        sku: datiolabs_core::models::Sku::new(sku).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?,
-        nombre: datiolabs_core::models::Nombre::new(nombre).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?,
-        precio_usd: precio, impuesto_pct: impuesto, stock, capacidades: caps,
-        categoria_id: body.get("categoriaId").and_then(|v| v.as_str()).map(String::from),
-        precio_bruto_usd: body.get("precioBrutoUsd").and_then(|v| v.as_str()).and_then(|s| s.parse::<rust_decimal::Decimal>().ok()),
-        margen_pct: body.get("margenPct").and_then(|v| v.as_str()).and_then(|s| s.parse::<rust_decimal::Decimal>().ok()),
-        sin_stock: body.get("sinStock").and_then(|v| v.as_bool()).unwrap_or(false),
-        unidad: body.get("unidad").and_then(|v| v.as_str()).map(String::from),
-        es_caja: body.get("esCaja").and_then(|v| v.as_bool()).unwrap_or(false),
-        unidades_por_caja: body.get("unidadesPorCaja").and_then(|v| v.as_u64()).map(|n| n as u32),
-        precio_paquete_usd: body.get("precioPaqueteUsd").and_then(|v| v.as_str()).and_then(|s| s.parse::<rust_decimal::Decimal>().ok()),
-        nombre_paquete: body.get("nombrePaquete").and_then(|v| v.as_str()).map(String::from),
+        sku: datiolabs_core::models::Sku::new(sku)
+            .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?,
+        nombre: datiolabs_core::models::Nombre::new(nombre)
+            .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?,
+        precio_usd: precio,
+        impuesto_pct: impuesto,
+        stock,
+        capacidades: caps,
+        categoria_id: body
+            .get("categoriaId")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        precio_bruto_usd: body
+            .get("precioBrutoUsd")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<rust_decimal::Decimal>().ok()),
+        margen_pct: body
+            .get("margenPct")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<rust_decimal::Decimal>().ok()),
+        sin_stock: body
+            .get("sinStock")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        unidad: body
+            .get("unidad")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        es_caja: body
+            .get("esCaja")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        unidades_por_caja: body
+            .get("unidadesPorCaja")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u32),
+        precio_paquete_usd: body
+            .get("precioPaqueteUsd")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<rust_decimal::Decimal>().ok()),
+        nombre_paquete: body
+            .get("nombrePaquete")
+            .and_then(|v| v.as_str())
+            .map(String::from),
     };
-    let db = state.ledger.lock().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "DB bloqueada".to_string()))?;
-    db.guardar_producto(&p).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let db = state.ledger.lock().map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "DB bloqueada".to_string(),
+        )
+    })?;
+    db.guardar_producto(&p)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -848,9 +1122,24 @@ async fn api_productos_eliminar(
     State(state): State<AxumAppState>,
     Path(sku): Path<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let tree = db.inner_db().open_tree("productos").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    tree.remove(sku.as_bytes()).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let tree = db.inner_db().open_tree("productos").map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    tree.remove(sku.as_bytes()).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -861,15 +1150,34 @@ async fn api_productos_compra(
     Path(sku): Path<String>,
     Json(body): Json<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let cant = body.get("cantidad").and_then(|v| v.parse::<rust_decimal::Decimal>().ok()).unwrap_or(rust_decimal::Decimal::ZERO);
-    if cant <= rust_decimal::Decimal::ZERO { return Err((StatusCode::BAD_REQUEST, "Solicitud inválida".to_string())); }
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let cant = body
+        .get("cantidad")
+        .and_then(|v| v.parse::<rust_decimal::Decimal>().ok())
+        .unwrap_or(rust_decimal::Decimal::ZERO);
+    if cant <= rust_decimal::Decimal::ZERO {
+        return Err((StatusCode::BAD_REQUEST, "Solicitud inválida".to_string()));
+    }
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
     let mov = datiolabs_core::models::MovimientoStock {
-        id: uuid::Uuid::new_v4().to_string(), sku: sku.clone(),
-        delta: cant, motivo: datiolabs_core::models::MotivoMovimiento::Compra,
-        venta_id: None, fecha_unix: ahora_unix(), firma_sha256: String::new(),
+        id: uuid::Uuid::new_v4().to_string(),
+        sku: sku.clone(),
+        delta: cant,
+        motivo: datiolabs_core::models::MotivoMovimiento::Compra,
+        venta_id: None,
+        fecha_unix: ahora_unix(),
+        firma_sha256: String::new(),
     };
-    db.aplicar_movimiento(mov, |_, _| {}).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    db.aplicar_movimiento(mov, |_, _| {}).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -880,15 +1188,34 @@ async fn api_productos_reducir(
     Path(sku): Path<String>,
     Json(body): Json<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let cant = body.get("cantidad").and_then(|v| v.parse::<rust_decimal::Decimal>().ok()).unwrap_or(rust_decimal::Decimal::ZERO);
-    if cant <= rust_decimal::Decimal::ZERO { return Err((StatusCode::BAD_REQUEST, "Solicitud inválida".to_string())); }
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let cant = body
+        .get("cantidad")
+        .and_then(|v| v.parse::<rust_decimal::Decimal>().ok())
+        .unwrap_or(rust_decimal::Decimal::ZERO);
+    if cant <= rust_decimal::Decimal::ZERO {
+        return Err((StatusCode::BAD_REQUEST, "Solicitud inválida".to_string()));
+    }
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
     let mov = datiolabs_core::models::MovimientoStock {
-        id: uuid::Uuid::new_v4().to_string(), sku: sku.clone(),
-        delta: -cant, motivo: datiolabs_core::models::MotivoMovimiento::Ajuste,
-        venta_id: None, fecha_unix: ahora_unix(), firma_sha256: String::new(),
+        id: uuid::Uuid::new_v4().to_string(),
+        sku: sku.clone(),
+        delta: -cant,
+        motivo: datiolabs_core::models::MotivoMovimiento::Ajuste,
+        venta_id: None,
+        fecha_unix: ahora_unix(),
+        firma_sha256: String::new(),
     };
-    db.aplicar_movimiento(mov, |_, _| {}).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    db.aplicar_movimiento(mov, |_, _| {}).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -899,15 +1226,34 @@ async fn api_productos_merma(
     Path(sku): Path<String>,
     Json(body): Json<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let cant = body.get("cantidad").and_then(|v| v.parse::<rust_decimal::Decimal>().ok()).unwrap_or(rust_decimal::Decimal::ZERO);
-    if cant <= rust_decimal::Decimal::ZERO { return Err((StatusCode::BAD_REQUEST, "Solicitud inválida".to_string())); }
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let cant = body
+        .get("cantidad")
+        .and_then(|v| v.parse::<rust_decimal::Decimal>().ok())
+        .unwrap_or(rust_decimal::Decimal::ZERO);
+    if cant <= rust_decimal::Decimal::ZERO {
+        return Err((StatusCode::BAD_REQUEST, "Solicitud inválida".to_string()));
+    }
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
     let mov = datiolabs_core::models::MovimientoStock {
-        id: uuid::Uuid::new_v4().to_string(), sku: sku.clone(),
-        delta: -cant, motivo: datiolabs_core::models::MotivoMovimiento::Merma,
-        venta_id: None, fecha_unix: ahora_unix(), firma_sha256: String::new(),
+        id: uuid::Uuid::new_v4().to_string(),
+        sku: sku.clone(),
+        delta: -cant,
+        motivo: datiolabs_core::models::MotivoMovimiento::Merma,
+        venta_id: None,
+        fecha_unix: ahora_unix(),
+        firma_sha256: String::new(),
     };
-    db.aplicar_movimiento(mov, |_, _| {}).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    db.aplicar_movimiento(mov, |_, _| {}).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -916,14 +1262,27 @@ async fn api_productos_merma(
 async fn api_ventas_listar(
     State(state): State<AxumAppState>,
 ) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let ventas = db.ventas_recientes(200).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let result: Vec<serde_json::Value> = ventas.iter().map(|v| {
-        serde_json::json!({
-            "ventaId": v.id, "totalUsd": v.total_usd.to_string(),
-            "totalBs": v.total_bs.to_string(), "fechaHora": v.fecha_cierre_unix,
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let ventas = db.ventas_recientes(200).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let result: Vec<serde_json::Value> = ventas
+        .iter()
+        .map(|v| {
+            serde_json::json!({
+                "ventaId": v.id, "totalUsd": v.total_usd.to_string(),
+                "totalBs": v.total_bs.to_string(), "fechaHora": v.fecha_cierre_unix,
+            })
         })
-    }).collect();
+        .collect();
     Ok(Json(result))
 }
 
@@ -931,28 +1290,58 @@ async fn api_ventas_registrar(
     State(state): State<AxumAppState>,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let items = body.get("items").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-    if items.is_empty() { return Err((StatusCode::BAD_REQUEST, "Solicitud inválida".to_string())); }
+    let items = body
+        .get("items")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if items.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Solicitud inválida".to_string()));
+    }
     let tasa = state.servicio_tasa.info_actual().valor;
     if tasa <= rust_decimal::Decimal::ZERO {
-        return Err((StatusCode::BAD_REQUEST, "Tasa de cambio no disponible o inválida".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Tasa de cambio no disponible o inválida".to_string(),
+        ));
     }
-    let monto_recibido_bs: rust_decimal::Decimal = body.get("montoRecibidoBs")
-        .and_then(|v| v.as_str()).and_then(|s| s.parse().ok())
+    let monto_recibido_bs: rust_decimal::Decimal = body
+        .get("montoRecibidoBs")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse().ok())
         .unwrap_or(rust_decimal::Decimal::ZERO);
 
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let catalogo = db.cargar_catalogo().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let catalogo = db.cargar_catalogo().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
 
     // Validate stock and build lineas
     let mut lineas = datiolabs_core::models::LineasVenta::nuevas();
     let mut toques: Vec<(usize, rust_decimal::Decimal, String)> = Vec::with_capacity(items.len());
     for item in &items {
         let sku_str = item.get("sku").and_then(|v| v.as_str()).unwrap_or("");
-        let cant: rust_decimal::Decimal = item.get("cantidad").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or(rust_decimal::Decimal::ONE);
-        let modo = item.get("modo_venta").and_then(|v| v.as_str()).unwrap_or("unidad");
-        let idx = catalogo.indice_de(sku_str)
-            .ok_or((StatusCode::BAD_REQUEST, format!("SKU inexistente: {sku_str}")))?;
+        let cant: rust_decimal::Decimal = item
+            .get("cantidad")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(rust_decimal::Decimal::ONE);
+        let modo = item
+            .get("modo_venta")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unidad");
+        let idx = catalogo.indice_de(sku_str).ok_or((
+            StatusCode::BAD_REQUEST,
+            format!("SKU inexistente: {sku_str}"),
+        ))?;
         let tiene_paquete = catalogo.precio_paquete_usd(idx).is_some()
             || (catalogo.es_caja(idx) && catalogo.unidades_por_caja(idx).unwrap_or(0) > 1);
         let cant_unidades = if modo == "paquete" && tiene_paquete {
@@ -960,22 +1349,38 @@ async fn api_ventas_registrar(
         } else {
             cant
         };
-        validar_linea(catalogo.capacidades(idx), cant_unidades, catalogo.stock(idx))
-            .map_err(|e| (StatusCode::BAD_REQUEST, format!("{e}")))?;
+        validar_linea(
+            catalogo.capacidades(idx),
+            cant_unidades,
+            catalogo.stock(idx),
+        )
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("{e}")))?;
         toques.push((idx, cant, modo.to_string()));
         let precio_efectivo = if modo == "paquete" && tiene_paquete {
-            catalogo.precio_paquete_usd(idx).unwrap_or(catalogo.precio_usd(idx))
+            catalogo
+                .precio_paquete_usd(idx)
+                .unwrap_or(catalogo.precio_usd(idx))
         } else {
             catalogo.precio_usd(idx)
         };
-        lineas.agregar(catalogo.sku_obj(idx), catalogo.nombre_obj(idx), cant, precio_efectivo, tasa, modo.to_string());
+        lineas.agregar(
+            catalogo.sku_obj(idx),
+            catalogo.nombre_obj(idx),
+            cant,
+            precio_efectivo,
+            tasa,
+            modo.to_string(),
+        );
     }
 
     let total_usd = lineas.total_usd();
     let total_bs = lineas.total_bs();
     let epsilon = rust_decimal::Decimal::from_str("0.01").unwrap_or(rust_decimal::Decimal::ZERO);
     if monto_recibido_bs > rust_decimal::Decimal::ZERO && (monto_recibido_bs + epsilon) < total_bs {
-        return Err((StatusCode::BAD_REQUEST, "El pago recibido no cubre el total en bolivares".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "El pago recibido no cubre el total en bolivares".to_string(),
+        ));
     }
     let vuelto = if monto_recibido_bs > rust_decimal::Decimal::ZERO {
         monto_recibido_bs - total_bs
@@ -984,17 +1389,44 @@ async fn api_ventas_registrar(
     };
 
     // Parse pagos
-    let pagos_body = body.get("pagos").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-    let pagos_model: Vec<datiolabs_core::models::PagoVenta> = pagos_body.iter().map(|p| {
-        datiolabs_core::models::PagoVenta {
-            metodo: p.get("metodo").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            moneda: p.get("moneda").and_then(|v| v.as_str()).unwrap_or("BS").to_string(),
-            monto_usd: p.get("montoUsd").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or(rust_decimal::Decimal::ZERO),
-            monto_bs: p.get("montoBs").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or(rust_decimal::Decimal::ZERO),
-            tasa_cambio: p.get("tasaCambio").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()),
-            referencia: p.get("referencia").and_then(|v| v.as_str()).map(String::from),
-        }
-    }).collect();
+    let pagos_body = body
+        .get("pagos")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let pagos_model: Vec<datiolabs_core::models::PagoVenta> = pagos_body
+        .iter()
+        .map(|p| datiolabs_core::models::PagoVenta {
+            metodo: p
+                .get("metodo")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            moneda: p
+                .get("moneda")
+                .and_then(|v| v.as_str())
+                .unwrap_or("BS")
+                .to_string(),
+            monto_usd: p
+                .get("montoUsd")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(rust_decimal::Decimal::ZERO),
+            monto_bs: p
+                .get("montoBs")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(rust_decimal::Decimal::ZERO),
+            tasa_cambio: p
+                .get("tasaCambio")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse().ok()),
+            referencia: p
+                .get("referencia")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+        })
+        .collect();
 
     // Parse resolucion_vuelto
     let res_vuelto = body.get("resolucionVuelto");
@@ -1002,8 +1434,12 @@ async fn api_ventas_registrar(
         Some(res) => (
             res.get("estado").and_then(|v| v.as_str()).map(String::from),
             res.get("metodo").and_then(|v| v.as_str()).map(String::from),
-            res.get("montoUsd").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()),
-            res.get("tasa").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()),
+            res.get("montoUsd")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse().ok()),
+            res.get("tasa")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse().ok()),
         ),
         None => {
             let est = if vuelto > rust_decimal::Decimal::ZERO {
@@ -1018,23 +1454,47 @@ async fn api_ventas_registrar(
     // Deduct stock
     let venta_id = uuid::Uuid::new_v4().to_string();
     for (idx, cantidad, modo) in &toques {
-        descontar_con_lotes_interno(&*db, &catalogo, *idx, *cantidad, &venta_id, modo)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+        descontar_con_lotes_interno(&*db, &catalogo, *idx, *cantidad, &venta_id, modo).map_err(
+            |e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Error interno: {e}"),
+                )
+            },
+        )?;
     }
 
     let venta = datiolabs_core::models::Venta {
-        id: venta_id, etiqueta: String::new(),
-        es_cuenta_abierta: false, estado: datiolabs_core::models::EstadoVenta::Cerrada,
-        lineas, tasa_del_dia: tasa, total_usd, total_bs,
-        monto_recibido_bs, vuelto_bs: vuelto,
-        pagos: pagos_model, estado_vuelto: estado_v, metodo_vuelto: metodo_v,
-        monto_vuelto_usd: monto_v_usd, tasa_vuelto: tasa_v,
-        fecha_apertura_unix: ahora_unix(), fecha_cierre_unix: ahora_unix(),
-        firma_sha256: String::new(), tipo: "venta".to_string(),
-        cliente: None, nota: None, abonos_usd: None, abonos_bs: None,
+        id: venta_id,
+        etiqueta: String::new(),
+        es_cuenta_abierta: false,
+        estado: datiolabs_core::models::EstadoVenta::Cerrada,
+        lineas,
+        tasa_del_dia: tasa,
+        total_usd,
+        total_bs,
+        monto_recibido_bs,
+        vuelto_bs: vuelto,
+        pagos: pagos_model,
+        estado_vuelto: estado_v,
+        metodo_vuelto: metodo_v,
+        monto_vuelto_usd: monto_v_usd,
+        tasa_vuelto: tasa_v,
+        fecha_apertura_unix: ahora_unix(),
+        fecha_cierre_unix: ahora_unix(),
+        firma_sha256: String::new(),
+        tipo: "venta".to_string(),
+        cliente: None,
+        nota: None,
+        abonos_usd: None,
+        abonos_bs: None,
     };
-    let firmada = db.guardar_venta(venta)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+    let firmada = db.guardar_venta(venta).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
 
     // Actualizar contadores de la jornada activa
     if let Ok(Some(mut jornada)) = db.jornada_actual() {
@@ -1042,8 +1502,12 @@ async fn api_ventas_registrar(
         jornada.ventas_total_bs += total_bs;
         jornada.tickets_emitidos += 1;
         match firmada.estado_vuelto.as_deref() {
-            Some("PAGADO") => { jornada.vuelto_pagado_bs += vuelto; }
-            Some("RETENIDO") => { jornada.vuelto_retenido_bs += vuelto; }
+            Some("PAGADO") => {
+                jornada.vuelto_pagado_bs += vuelto;
+            }
+            Some("RETENIDO") => {
+                jornada.vuelto_retenido_bs += vuelto;
+            }
             _ => {}
         }
         let _ = db.guardar_jornada(&jornada);
@@ -1053,156 +1517,542 @@ async fn api_ventas_registrar(
     let ticket = armar_ticket(&firmada, monto_recibido_bs, vuelto);
     drop(db);
     let _ = state.tx.send(());
-    Ok(Json(serde_json::to_value(ticket).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error serializando ticket: {e}")))?))
+    Ok(Json(serde_json::to_value(ticket).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error serializando ticket: {e}"),
+        )
+    })?))
 }
 
 // CRUD categorias
-async fn api_categorias_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::Categoria>>, (StatusCode, String)> {
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let cats = db.listar_categorias().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+async fn api_categorias_listar(
+    State(state): State<AxumAppState>,
+) -> Result<Json<Vec<datiolabs_core::models::Categoria>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let cats = db.listar_categorias().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
     Ok(Json(cats))
 }
-async fn api_categorias_crear(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<Vec<datiolabs_core::models::Categoria>>, (StatusCode, String)> {
+async fn api_categorias_crear(
+    State(state): State<AxumAppState>,
+    Json(body): Json<HashMap<String, String>>,
+) -> Result<Json<Vec<datiolabs_core::models::Categoria>>, (StatusCode, String)> {
     let nombre = body.get("nombre").cloned().unwrap_or_default();
-    let cat = datiolabs_core::models::Categoria { id: format!("cat-{}", uuid::Uuid::new_v4().to_string()[..8].to_string()), nombre };
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    db.guardar_categoria(&cat).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let cats = db.listar_categorias().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    drop(db); let _ = state.tx.send(());
+    let cat = datiolabs_core::models::Categoria {
+        id: format!("cat-{}", uuid::Uuid::new_v4().to_string()[..8].to_string()),
+        nombre,
+    };
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    db.guardar_categoria(&cat).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let cats = db.listar_categorias().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    drop(db);
+    let _ = state.tx.send(());
     Ok(Json(cats))
 }
-async fn api_categorias_eliminar(State(state): State<AxumAppState>, Path(id): Path<String>) -> Result<Json<Vec<datiolabs_core::models::Categoria>>, (StatusCode, String)> {
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    db.eliminar_categoria(&id).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let cats = db.listar_categorias().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    drop(db); let _ = state.tx.send(());
+async fn api_categorias_eliminar(
+    State(state): State<AxumAppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<datiolabs_core::models::Categoria>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    db.eliminar_categoria(&id).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let cats = db.listar_categorias().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    drop(db);
+    let _ = state.tx.send(());
     Ok(Json(cats))
 }
 
 // CRUD tasas impuestos
-async fn api_tasas_impuestos_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::TasaImpuesto>>, (StatusCode, String)> {
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    Ok(Json(db.listar_tasas_impuestos().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?))
+async fn api_tasas_impuestos_listar(
+    State(state): State<AxumAppState>,
+) -> Result<Json<Vec<datiolabs_core::models::TasaImpuesto>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    Ok(Json(db.listar_tasas_impuestos().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?))
 }
-async fn api_tasas_impuestos_crear(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, serde_json::Value>>) -> Result<Json<Vec<datiolabs_core::models::TasaImpuesto>>, (StatusCode, String)> {
-    let nombre = body.get("nombre").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let porcentaje = body.get("porcentaje").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let t = datiolabs_core::models::TasaImpuesto { id: format!("ti-{}", uuid::Uuid::new_v4().to_string()[..8].to_string()), nombre, porcentaje: rust_decimal::Decimal::try_from(porcentaje).unwrap_or(rust_decimal::Decimal::ZERO) };
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    db.guardar_tasa_impuesto(&t).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let result = db.listar_tasas_impuestos().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    drop(db); let _ = state.tx.send(());
+async fn api_tasas_impuestos_crear(
+    State(state): State<AxumAppState>,
+    Json(body): Json<HashMap<String, serde_json::Value>>,
+) -> Result<Json<Vec<datiolabs_core::models::TasaImpuesto>>, (StatusCode, String)> {
+    let nombre = body
+        .get("nombre")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let porcentaje = body
+        .get("porcentaje")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let t = datiolabs_core::models::TasaImpuesto {
+        id: format!("ti-{}", uuid::Uuid::new_v4().to_string()[..8].to_string()),
+        nombre,
+        porcentaje: rust_decimal::Decimal::try_from(porcentaje)
+            .unwrap_or(rust_decimal::Decimal::ZERO),
+    };
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    db.guardar_tasa_impuesto(&t).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let result = db.listar_tasas_impuestos().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    drop(db);
+    let _ = state.tx.send(());
     Ok(Json(result))
 }
-async fn api_tasas_impuestos_eliminar(State(state): State<AxumAppState>, Path(id): Path<String>) -> Result<Json<Vec<datiolabs_core::models::TasaImpuesto>>, (StatusCode, String)> {
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    db.eliminar_tasa_impuesto(&id).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let result = db.listar_tasas_impuestos().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    drop(db); let _ = state.tx.send(());
+async fn api_tasas_impuestos_eliminar(
+    State(state): State<AxumAppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<datiolabs_core::models::TasaImpuesto>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    db.eliminar_tasa_impuesto(&id).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let result = db.listar_tasas_impuestos().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    drop(db);
+    let _ = state.tx.send(());
     Ok(Json(result))
 }
 
 // CRUD metodos pago
-async fn api_metodos_pago_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::MetodoPagoConfig>>, (StatusCode, String)> {
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    Ok(Json(db.listar_metodos_pago().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?))
+async fn api_metodos_pago_listar(
+    State(state): State<AxumAppState>,
+) -> Result<Json<Vec<datiolabs_core::models::MetodoPagoConfig>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    Ok(Json(db.listar_metodos_pago().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?))
 }
-async fn api_metodos_pago_crear(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<Vec<datiolabs_core::models::MetodoPagoConfig>>, (StatusCode, String)> {
-    let nombre = body.get("nombre").cloned().unwrap_or_default().to_uppercase();
-    let moneda = body.get("moneda").cloned().unwrap_or_else(|| "BS".to_string());
+async fn api_metodos_pago_crear(
+    State(state): State<AxumAppState>,
+    Json(body): Json<HashMap<String, String>>,
+) -> Result<Json<Vec<datiolabs_core::models::MetodoPagoConfig>>, (StatusCode, String)> {
+    let nombre = body
+        .get("nombre")
+        .cloned()
+        .unwrap_or_default()
+        .to_uppercase();
+    let moneda = body
+        .get("moneda")
+        .cloned()
+        .unwrap_or_else(|| "BS".to_string());
     let m = datiolabs_core::models::MetodoPagoConfig { nombre, moneda };
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    db.guardar_metodo_pago(&m).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let result = db.listar_metodos_pago().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    drop(db); let _ = state.tx.send(());
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    db.guardar_metodo_pago(&m).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let result = db.listar_metodos_pago().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    drop(db);
+    let _ = state.tx.send(());
     Ok(Json(result))
 }
-async fn api_metodos_pago_eliminar(State(state): State<AxumAppState>, Path(nombre): Path<String>) -> Result<Json<Vec<datiolabs_core::models::MetodoPagoConfig>>, (StatusCode, String)> {
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    db.eliminar_metodo_pago(&nombre).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let result = db.listar_metodos_pago().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    drop(db); let _ = state.tx.send(());
+async fn api_metodos_pago_eliminar(
+    State(state): State<AxumAppState>,
+    Path(nombre): Path<String>,
+) -> Result<Json<Vec<datiolabs_core::models::MetodoPagoConfig>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    db.eliminar_metodo_pago(&nombre).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let result = db.listar_metodos_pago().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    drop(db);
+    let _ = state.tx.send(());
     Ok(Json(result))
 }
 
 // CRUD operadores
-async fn api_operadores_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::Operador>>, (StatusCode, String)> {
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    Ok(Json(db.listar_operadores().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?))
+async fn api_operadores_listar(
+    State(state): State<AxumAppState>,
+) -> Result<Json<Vec<datiolabs_core::models::Operador>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    Ok(Json(db.listar_operadores().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?))
 }
-async fn api_operadores_crear(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<Vec<datiolabs_core::models::Operador>>, (StatusCode, String)> {
+async fn api_operadores_crear(
+    State(state): State<AxumAppState>,
+    Json(body): Json<HashMap<String, String>>,
+) -> Result<Json<Vec<datiolabs_core::models::Operador>>, (StatusCode, String)> {
     let nombre = body.get("nombre").cloned().unwrap_or_default();
-    let op = datiolabs_core::models::Operador { id: format!("op-{}", uuid::Uuid::new_v4().to_string()[..8].to_string()), nombre, activo: true, creado_unix: ahora_unix() };
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    db.guardar_operador(&op).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let result = db.listar_operadores().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    drop(db); let _ = state.tx.send(());
+    let op = datiolabs_core::models::Operador {
+        id: format!("op-{}", uuid::Uuid::new_v4().to_string()[..8].to_string()),
+        nombre,
+        activo: true,
+        creado_unix: ahora_unix(),
+    };
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    db.guardar_operador(&op).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let result = db.listar_operadores().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    drop(db);
+    let _ = state.tx.send(());
     Ok(Json(result))
 }
-async fn api_operadores_editar(State(state): State<AxumAppState>, Path(id): Path<String>, Json(body): Json<HashMap<String, String>>) -> Result<Json<Vec<datiolabs_core::models::Operador>>, (StatusCode, String)> {
+async fn api_operadores_editar(
+    State(state): State<AxumAppState>,
+    Path(id): Path<String>,
+    Json(body): Json<HashMap<String, String>>,
+) -> Result<Json<Vec<datiolabs_core::models::Operador>>, (StatusCode, String)> {
     let nombre = body.get("nombre").cloned().unwrap_or_default();
-    let mut ops = { let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?; db.listar_operadores().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))? };
-    if let Some(op) = ops.iter_mut().find(|o| o.id == id) { op.nombre = nombre; }
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    for op in &ops { db.guardar_operador(op).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?; }
-    let result = db.listar_operadores().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    drop(db); let _ = state.tx.send(());
+    let mut ops = {
+        let db = state.ledger.lock().map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error interno: {e}"),
+            )
+        })?;
+        db.listar_operadores().map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error interno: {e}"),
+            )
+        })?
+    };
+    if let Some(op) = ops.iter_mut().find(|o| o.id == id) {
+        op.nombre = nombre;
+    }
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    for op in &ops {
+        db.guardar_operador(op).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error interno: {e}"),
+            )
+        })?;
+    }
+    let result = db.listar_operadores().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    drop(db);
+    let _ = state.tx.send(());
     Ok(Json(result))
 }
-async fn api_operadores_eliminar(State(state): State<AxumAppState>, Path(id): Path<String>) -> Result<Json<Vec<datiolabs_core::models::Operador>>, (StatusCode, String)> {
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    db.eliminar_operador(&id).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let result = db.listar_operadores().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    drop(db); let _ = state.tx.send(());
+async fn api_operadores_eliminar(
+    State(state): State<AxumAppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<datiolabs_core::models::Operador>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    db.eliminar_operador(&id).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let result = db.listar_operadores().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    drop(db);
+    let _ = state.tx.send(());
     Ok(Json(result))
 }
-async fn api_operadores_alternar(State(state): State<AxumAppState>, Path(id): Path<String>) -> Result<Json<Vec<datiolabs_core::models::Operador>>, (StatusCode, String)> {
-    let mut ops = { let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?; db.listar_operadores().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))? };
-    if let Some(op) = ops.iter_mut().find(|o| o.id == id) { op.activo = !op.activo; }
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    for op in &ops { db.guardar_operador(op).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?; }
-    let result = db.listar_operadores().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    drop(db); let _ = state.tx.send(());
+async fn api_operadores_alternar(
+    State(state): State<AxumAppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<datiolabs_core::models::Operador>>, (StatusCode, String)> {
+    let mut ops = {
+        let db = state.ledger.lock().map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error interno: {e}"),
+            )
+        })?;
+        db.listar_operadores().map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error interno: {e}"),
+            )
+        })?
+    };
+    if let Some(op) = ops.iter_mut().find(|o| o.id == id) {
+        op.activo = !op.activo;
+    }
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    for op in &ops {
+        db.guardar_operador(op).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error interno: {e}"),
+            )
+        })?;
+    }
+    let result = db.listar_operadores().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    drop(db);
+    let _ = state.tx.send(());
     Ok(Json(result))
 }
 
 // Jornadas
-async fn api_jornada_actual(State(state): State<AxumAppState>) -> Result<Json<Option<datiolabs_core::models::Jornada>>, (StatusCode, String)> {
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    Ok(Json(db.jornada_actual().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?))
+async fn api_jornada_actual(
+    State(state): State<AxumAppState>,
+) -> Result<Json<Option<datiolabs_core::models::Jornada>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    Ok(Json(db.jornada_actual().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?))
 }
-async fn api_jornadas_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::Jornada>>, (StatusCode, String)> {
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    Ok(Json(db.listar_jornadas(50).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?))
+async fn api_jornadas_listar(
+    State(state): State<AxumAppState>,
+) -> Result<Json<Vec<datiolabs_core::models::Jornada>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    Ok(Json(db.listar_jornadas(50).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?))
 }
-async fn api_jornadas_abrir(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, serde_json::Value>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let operador = body.get("operador").and_then(|v| v.as_str()).unwrap_or("").to_string();
+async fn api_jornadas_abrir(
+    State(state): State<AxumAppState>,
+    Json(body): Json<HashMap<String, serde_json::Value>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let operador = body
+        .get("operador")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let tasa = state.servicio_tasa.info_actual().valor;
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    if db.jornada_actual().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?.is_some() {
-        return Err((StatusCode::CONFLICT, "Conflicto: ya existe un recurso similar".to_string()));
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    if db
+        .jornada_actual()
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error interno: {e}"),
+            )
+        })?
+        .is_some()
+    {
+        return Err((
+            StatusCode::CONFLICT,
+            "Conflicto: ya existe un recurso similar".to_string(),
+        ));
     }
     let jornada = datiolabs_core::models::Jornada {
         id: format!("JOR-{}-01", chrono::Utc::now().format("%Y%m%d")),
-        estado: "abierta".to_string(), inicio_unix: ahora_unix(), fin_unix: None,
-        operador_inicial: operador.clone(), operador_actual: operador,
-        operadores_activos: Vec::new(), operadores_relevo: Vec::new(),
-        tasa_inicio: tasa, tasa_fin: None,
-        ventas_total_usd: rust_decimal::Decimal::ZERO, ventas_total_bs: rust_decimal::Decimal::ZERO,
-        tickets_emitidos: 0, vuelto_pagado_bs: rust_decimal::Decimal::ZERO,
-        vuelto_retenido_bs: rust_decimal::Decimal::ZERO, deudas_liquidadas_usd: rust_decimal::Decimal::ZERO,
-        entradas_stock_reg: 0, mermas_stock_reg: 0, cambios_precio_reg: 0, checksum_sha256: None,
+        estado: "abierta".to_string(),
+        inicio_unix: ahora_unix(),
+        fin_unix: None,
+        operador_inicial: operador.clone(),
+        operador_actual: operador,
+        operadores_activos: Vec::new(),
+        operadores_relevo: Vec::new(),
+        tasa_inicio: tasa,
+        tasa_fin: None,
+        ventas_total_usd: rust_decimal::Decimal::ZERO,
+        ventas_total_bs: rust_decimal::Decimal::ZERO,
+        tickets_emitidos: 0,
+        vuelto_pagado_bs: rust_decimal::Decimal::ZERO,
+        vuelto_retenido_bs: rust_decimal::Decimal::ZERO,
+        deudas_liquidadas_usd: rust_decimal::Decimal::ZERO,
+        entradas_stock_reg: 0,
+        mermas_stock_reg: 0,
+        cambios_precio_reg: 0,
+        checksum_sha256: None,
     };
-    db.guardar_jornada(&jornada).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    drop(db); let _ = state.tx.send(());
-    Ok(Json(serde_json::to_value(jornada).unwrap_or(serde_json::json!({}))))
+    db.guardar_jornada(&jornada).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    drop(db);
+    let _ = state.tx.send(());
+    Ok(Json(
+        serde_json::to_value(jornada).unwrap_or(serde_json::json!({})),
+    ))
 }
-async fn api_jornadas_cerrar(State(state): State<AxumAppState>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+async fn api_jornadas_cerrar(
+    State(state): State<AxumAppState>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let tasa = state.servicio_tasa.info_actual().valor;
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let mut jornada = db.jornada_actual().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let mut jornada = db
+        .jornada_actual()
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error interno: {e}"),
+            )
+        })?
         .ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
-    
+
     let ahora = ahora_unix();
     if let Ok(ventas) = db.consultar_ventas_rango(jornada.inicio_unix, ahora) {
         let mut tot_usd = rust_decimal::Decimal::ZERO;
@@ -1226,90 +2076,295 @@ async fn api_jornadas_cerrar(State(state): State<AxumAppState>) -> Result<Json<s
     jornada.tasa_fin = Some(tasa);
     let checksum = format!("{:x}", sha2::Sha256::digest(jornada.id.as_bytes()));
     jornada.checksum_sha256 = Some(checksum);
-    db.guardar_jornada(&jornada).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    drop(db); let _ = state.tx.send(());
-    Ok(Json(serde_json::to_value(jornada).unwrap_or(serde_json::json!({}))))
+    db.guardar_jornada(&jornada).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    drop(db);
+    let _ = state.tx.send(());
+    Ok(Json(
+        serde_json::to_value(jornada).unwrap_or(serde_json::json!({})),
+    ))
 }
-async fn api_jornadas_asignar(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, serde_json::Value>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let ops: Vec<String> = body.get("operadores").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let mut jornada = db.jornada_actual().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?.ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
+async fn api_jornadas_asignar(
+    State(state): State<AxumAppState>,
+    Json(body): Json<HashMap<String, serde_json::Value>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let ops: Vec<String> = body
+        .get("operadores")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let mut jornada = db
+        .jornada_actual()
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error interno: {e}"),
+            )
+        })?
+        .ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
     jornada.operadores_activos = ops.clone();
-    for op in &ops { if !jornada.operadores_relevo.contains(op) { jornada.operadores_relevo.push(op.clone()); } }
-    db.guardar_jornada(&jornada).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    drop(db); let _ = state.tx.send(());
-    Ok(Json(serde_json::to_value(jornada).unwrap_or(serde_json::json!({}))))
+    for op in &ops {
+        if !jornada.operadores_relevo.contains(op) {
+            jornada.operadores_relevo.push(op.clone());
+        }
+    }
+    db.guardar_jornada(&jornada).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    drop(db);
+    let _ = state.tx.send(());
+    Ok(Json(
+        serde_json::to_value(jornada).unwrap_or(serde_json::json!({})),
+    ))
 }
-async fn api_jornadas_relevar(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+async fn api_jornadas_relevar(
+    State(state): State<AxumAppState>,
+    Json(body): Json<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let operador = body.get("operador").cloned().unwrap_or_default();
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let mut jornada = db.jornada_actual().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?.ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let mut jornada = db
+        .jornada_actual()
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error interno: {e}"),
+            )
+        })?
+        .ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
     jornada.operador_actual = operador.clone();
     jornada.operadores_activos = vec![operador.clone()];
-    if !jornada.operadores_relevo.contains(&operador) { jornada.operadores_relevo.push(operador); }
-    db.guardar_jornada(&jornada).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    drop(db); let _ = state.tx.send(());
-    Ok(Json(serde_json::to_value(jornada).unwrap_or(serde_json::json!({}))))
+    if !jornada.operadores_relevo.contains(&operador) {
+        jornada.operadores_relevo.push(operador);
+    }
+    db.guardar_jornada(&jornada).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    drop(db);
+    let _ = state.tx.send(());
+    Ok(Json(
+        serde_json::to_value(jornada).unwrap_or(serde_json::json!({})),
+    ))
 }
 
 // Dispositivos
-async fn api_dispositivos_listar(State(state): State<AxumAppState>) -> Result<Json<Vec<datiolabs_core::models::DispositivoRemoto>>, (StatusCode, String)> {
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    Ok(Json(db.listar_dispositivos().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?))
+async fn api_dispositivos_listar(
+    State(state): State<AxumAppState>,
+) -> Result<Json<Vec<datiolabs_core::models::DispositivoRemoto>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    Ok(Json(db.listar_dispositivos().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?))
 }
-async fn api_dispositivos_registrar(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<Vec<datiolabs_core::models::DispositivoRemoto>>, (StatusCode, String)> {
+async fn api_dispositivos_registrar(
+    State(state): State<AxumAppState>,
+    Json(body): Json<HashMap<String, String>>,
+) -> Result<Json<Vec<datiolabs_core::models::DispositivoRemoto>>, (StatusCode, String)> {
     let nombre = body.get("nombre").cloned().unwrap_or_default();
-    let d = datiolabs_core::models::DispositivoRemoto { id: format!("dev-{}", uuid::Uuid::new_v4().to_string()[..8].to_string()), nombre, ip: String::new(), ultimo_acceso: String::new(), activo: true };
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    db.guardar_dispositivo(&d).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let result = db.listar_dispositivos().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    drop(db); let _ = state.tx.send(());
+    let d = datiolabs_core::models::DispositivoRemoto {
+        id: format!("dev-{}", uuid::Uuid::new_v4().to_string()[..8].to_string()),
+        nombre,
+        ip: String::new(),
+        ultimo_acceso: String::new(),
+        activo: true,
+    };
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    db.guardar_dispositivo(&d).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let result = db.listar_dispositivos().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    drop(db);
+    let _ = state.tx.send(());
     Ok(Json(result))
 }
-async fn api_dispositivos_revocar(State(state): State<AxumAppState>, Path(id): Path<String>) -> Result<Json<Vec<datiolabs_core::models::DispositivoRemoto>>, (StatusCode, String)> {
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    db.eliminar_dispositivo(&id).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let result = db.listar_dispositivos().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    drop(db); let _ = state.tx.send(());
+async fn api_dispositivos_revocar(
+    State(state): State<AxumAppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<datiolabs_core::models::DispositivoRemoto>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    db.eliminar_dispositivo(&id).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let result = db.listar_dispositivos().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    drop(db);
+    let _ = state.tx.send(());
     Ok(Json(result))
 }
 
 // Semaforo
-async fn api_semaforo_obtener(State(state): State<AxumAppState>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let s = db.cargar_semaforo().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    Ok(Json(s.map(|v| serde_json::json!({ "rojoMax": v.rojo_max, "amarilloMax": v.amarillo_max })).unwrap_or(serde_json::json!({ "rojoMax": 5, "amarilloMax": 15 }))))
+async fn api_semaforo_obtener(
+    State(state): State<AxumAppState>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let s = db.cargar_semaforo().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    Ok(Json(
+        s.map(|v| serde_json::json!({ "rojoMax": v.rojo_max, "amarilloMax": v.amarillo_max }))
+            .unwrap_or(serde_json::json!({ "rojoMax": 5, "amarilloMax": 15 })),
+    ))
 }
-async fn api_semaforo_guardar(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, serde_json::Value>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+async fn api_semaforo_guardar(
+    State(state): State<AxumAppState>,
+    Json(body): Json<HashMap<String, serde_json::Value>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let rojo = body.get("rojoMax").and_then(|v| v.as_u64()).unwrap_or(5) as u32;
-    let amarillo = body.get("amarilloMax").and_then(|v| v.as_u64()).unwrap_or(15) as u32;
-    let s = datiolabs_core::models::SemaforoStock { rojo_max: rojo, amarillo_max: amarillo };
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    db.guardar_semaforo(&s).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    drop(db); let _ = state.tx.send(());
-    Ok(Json(serde_json::json!({ "rojoMax": rojo, "amarilloMax": amarillo })))
+    let amarillo = body
+        .get("amarilloMax")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(15) as u32;
+    let s = datiolabs_core::models::SemaforoStock {
+        rojo_max: rojo,
+        amarillo_max: amarillo,
+    };
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    db.guardar_semaforo(&s).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    drop(db);
+    let _ = state.tx.send(());
+    Ok(Json(
+        serde_json::json!({ "rojoMax": rojo, "amarilloMax": amarillo }),
+    ))
 }
 
 // PIN
-async fn api_pin_cambiar(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+async fn api_pin_cambiar(
+    State(state): State<AxumAppState>,
+    Json(body): Json<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let pin_anterior = body.get("pinAnterior").cloned().unwrap_or_default();
     let pin_nuevo = body.get("pinNuevo").cloned().unwrap_or_default();
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let mut cfg = db.cargar_config().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?.ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let mut cfg = db
+        .cargar_config()
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error interno: {e}"),
+            )
+        })?
+        .ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
     if !cfg.pin_dueno_sha256.is_empty() {
         let hash = format!("{:x}", sha2::Sha256::digest(pin_anterior.as_bytes()));
-        if cfg.pin_dueno_sha256 != hash { return Err((StatusCode::FORBIDDEN, "Acceso denegado".to_string())); }
+        if cfg.pin_dueno_sha256 != hash {
+            return Err((StatusCode::FORBIDDEN, "Acceso denegado".to_string()));
+        }
     }
-    cfg.pin_dueno_sha256 = if pin_nuevo.trim().is_empty() { String::new() } else { format!("{:x}", sha2::Sha256::digest(pin_nuevo.as_bytes())) };
-    db.actualizar_config(&cfg).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    drop(db); let _ = state.tx.send(());
+    cfg.pin_dueno_sha256 = if pin_nuevo.trim().is_empty() {
+        String::new()
+    } else {
+        format!("{:x}", sha2::Sha256::digest(pin_nuevo.as_bytes()))
+    };
+    db.actualizar_config(&cfg).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    drop(db);
+    let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 // Config
-async fn api_config(State(state): State<AxumAppState>) -> Result<Json<ConfigDto>, (StatusCode, String)> {
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let cfg = db.cargar_config().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?
+async fn api_config(
+    State(state): State<AxumAppState>,
+) -> Result<Json<ConfigDto>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let cfg = db
+        .cargar_config()
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error interno: {e}"),
+            )
+        })?
         .ok_or((StatusCode::NOT_FOUND, "No hay configuración".to_string()))?;
     Ok(Json(ConfigDto {
         capacidades: capacidades_de_rubros(cfg.rubros),
@@ -1323,29 +2378,72 @@ async fn api_config(State(state): State<AxumAppState>) -> Result<Json<ConfigDto>
 }
 
 // Privacidad de inventario
-async fn api_config_privacidad(State(state): State<AxumAppState>, Json(body): Json<HashMap<String, bool>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+async fn api_config_privacidad(
+    State(state): State<AxumAppState>,
+    Json(body): Json<HashMap<String, bool>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let valor = body.get("privacidadInventario").copied().unwrap_or(false);
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let mut cfg = db.cargar_config().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?.ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let mut cfg = db
+        .cargar_config()
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error interno: {e}"),
+            )
+        })?
+        .ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
     cfg.privacidad_inventario = valor;
-    db.actualizar_config(&cfg).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    drop(db); let _ = state.tx.send(());
+    db.actualizar_config(&cfg).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    drop(db);
+    let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 // Respaldos
-async fn api_respaldos_listar(State(_state): State<AxumAppState>) -> Result<Json<Vec<RespaldoInfo>>, (StatusCode, String)> {
+async fn api_respaldos_listar(
+    State(_state): State<AxumAppState>,
+) -> Result<Json<Vec<RespaldoInfo>>, (StatusCode, String)> {
     use datiolabs_core::db::BackupMetadata;
     use std::io::{BufReader, Read, Seek, SeekFrom};
-    let dir = get_backup_dir().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error directorio: {e}")))?;
+    let dir = get_backup_dir().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error directorio: {e}"),
+        )
+    })?;
     let mut infos = Vec::new();
-    for entry in std::fs::read_dir(&dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error directorio: {e}")))? {
-        let entry = entry.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error entrada: {e}")))?;
+    for entry in std::fs::read_dir(&dir).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error directorio: {e}"),
+        )
+    })? {
+        let entry = entry.map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error entrada: {e}"),
+            )
+        })?;
         let path = entry.path();
         if path.extension().and_then(|s| s.to_str()) != Some("backup") {
             continue;
         }
-        let archivo_nombre = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let archivo_nombre = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         let file_size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         let tamano_kb = file_size / 1024;
         let file = match std::fs::File::open(&path) {
@@ -1353,33 +2451,63 @@ async fn api_respaldos_listar(State(_state): State<AxumAppState>) -> Result<Json
             Err(_) => continue,
         };
         let mut reader = BufReader::new(file);
-        let header: datiolabs_core::db::BackupHeader = match bincode::deserialize_from(&mut reader) {
+        let header: datiolabs_core::db::BackupHeader = match bincode::deserialize_from(&mut reader)
+        {
             Ok(h) => h,
             Err(_) => continue,
         };
         let mut len_buf = [0u8; 4];
         let mut ok = true;
         for _ in 0..header.arboles_count {
-            if reader.read_exact(&mut len_buf).is_err() { ok = false; break; }
+            if reader.read_exact(&mut len_buf).is_err() {
+                ok = false;
+                break;
+            }
             let nombre_len = u32::from_le_bytes(len_buf) as i64;
-            if reader.seek(SeekFrom::Current(nombre_len)).is_err() { ok = false; break; }
-            if reader.read_exact(&mut len_buf).is_err() { ok = false; break; }
+            if reader.seek(SeekFrom::Current(nombre_len)).is_err() {
+                ok = false;
+                break;
+            }
+            if reader.read_exact(&mut len_buf).is_err() {
+                ok = false;
+                break;
+            }
             let cant_registros = u32::from_le_bytes(len_buf);
             for _ in 0..cant_registros {
-                if reader.read_exact(&mut len_buf).is_err() { ok = false; break; }
+                if reader.read_exact(&mut len_buf).is_err() {
+                    ok = false;
+                    break;
+                }
                 let clave_len = u32::from_le_bytes(len_buf) as i64;
-                if reader.seek(SeekFrom::Current(clave_len)).is_err() { ok = false; break; }
-                if reader.read_exact(&mut len_buf).is_err() { ok = false; break; }
+                if reader.seek(SeekFrom::Current(clave_len)).is_err() {
+                    ok = false;
+                    break;
+                }
+                if reader.read_exact(&mut len_buf).is_err() {
+                    ok = false;
+                    break;
+                }
                 let valor_len = u32::from_le_bytes(len_buf) as i64;
-                if reader.seek(SeekFrom::Current(valor_len)).is_err() { ok = false; break; }
+                if reader.seek(SeekFrom::Current(valor_len)).is_err() {
+                    ok = false;
+                    break;
+                }
             }
-            if !ok { break; }
+            if !ok {
+                break;
+            }
         }
-        if !ok { continue; }
+        if !ok {
+            continue;
+        }
         let metadata_len = file_size - reader.stream_position().unwrap_or(0);
-        if metadata_len == 0 || metadata_len > 1024 * 1024 { continue; }
+        if metadata_len == 0 || metadata_len > 1024 * 1024 {
+            continue;
+        }
         let mut metadata_buf = vec![0u8; metadata_len as usize];
-        if reader.read_exact(&mut metadata_buf).is_err() { continue; }
+        if reader.read_exact(&mut metadata_buf).is_err() {
+            continue;
+        }
         let meta: BackupMetadata = match bincode::deserialize(&metadata_buf) {
             Ok(m) => m,
             Err(_) => continue,
@@ -1400,19 +2528,47 @@ async fn api_respaldos_listar(State(_state): State<AxumAppState>) -> Result<Json
     infos.sort_by(|a, b| b.fecha.cmp(&a.fecha));
     Ok(Json(infos))
 }
-async fn api_respaldos_crear(state: State<AxumAppState>) -> Result<Json<RespaldoInfo>, (StatusCode, String)> {
-    let dir = get_backup_dir().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error directorio: {e}")))?;
-    std::fs::create_dir_all(&dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error directorio: {e}")))?;
+async fn api_respaldos_crear(
+    state: State<AxumAppState>,
+) -> Result<Json<RespaldoInfo>, (StatusCode, String)> {
+    let dir = get_backup_dir().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error directorio: {e}"),
+        )
+    })?;
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error directorio: {e}"),
+        )
+    })?;
     let ruta = std::path::Path::new(&dir).join(format!("datio_{}.backup", ahora_unix()));
     let ruta_str = ruta.to_string_lossy().to_string();
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let meta = db.exportar_backup(&ruta_str).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error al crear respaldo: {e}")))?;
-    let archivo_nombre = ruta.file_name().unwrap_or_default().to_string_lossy().to_string();
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let meta = db.exportar_backup(&ruta_str).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error al crear respaldo: {e}"),
+        )
+    })?;
+    let archivo_nombre = ruta
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
     let id = archivo_nombre.replace(".backup", "");
     let fecha = chrono::DateTime::from_timestamp(meta.timestamp_unix, 0)
         .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
         .unwrap_or_default();
-    let tamano_kb = std::fs::metadata(&ruta).map(|m| m.len() / 1024).unwrap_or(0);
+    let tamano_kb = std::fs::metadata(&ruta)
+        .map(|m| m.len() / 1024)
+        .unwrap_or(0);
     Ok(Json(RespaldoInfo {
         id,
         fecha,
@@ -1422,42 +2578,106 @@ async fn api_respaldos_crear(state: State<AxumAppState>) -> Result<Json<Respaldo
         checksum_sha256: meta.checksum_sha256,
     }))
 }
-async fn api_respaldos_restaurar(state: State<AxumAppState>, Json(body): Json<HashMap<String, String>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+async fn api_respaldos_restaurar(
+    state: State<AxumAppState>,
+    Json(body): Json<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     use base64::Engine;
     if let Some(contenido) = body.get("contenido_base64") {
-        let nombre = body.get("nombre_archivo").cloned().unwrap_or_else(|| format!("{}.backup", ahora_unix()));
+        let nombre = body
+            .get("nombre_archivo")
+            .cloned()
+            .unwrap_or_else(|| format!("{}.backup", ahora_unix()));
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(contenido)
             .map_err(|e| (StatusCode::BAD_REQUEST, format!("Base64 inválido: {e}")))?;
-        let dir = get_backup_dir().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error directorio: {e}")))?;
-        std::fs::create_dir_all(&dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error directorio: {e}")))?;
+        let dir = get_backup_dir().map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error directorio: {e}"),
+            )
+        })?;
+        std::fs::create_dir_all(&dir).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error directorio: {e}"),
+            )
+        })?;
         let safe_name = nombre.replace(['/', '\\', '\0'], "_");
         let ruta = std::path::Path::new(&dir).join(&safe_name);
-        std::fs::write(&ruta, &bytes).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error escritura: {e}")))?;
-        let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-        db.importar_backup(&ruta.to_string_lossy()).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error al restaurar: {e}")))?;
+        std::fs::write(&ruta, &bytes).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error escritura: {e}"),
+            )
+        })?;
+        let db = state.ledger.lock().map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error interno: {e}"),
+            )
+        })?;
+        db.importar_backup(&ruta.to_string_lossy()).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error al restaurar: {e}"),
+            )
+        })?;
         drop(db);
         let _ = state.tx.send(());
         return Ok(Json(serde_json::json!({ "ok": true })));
     }
     let archivo = body.get("archivo").cloned().unwrap_or_default();
-    let dir = get_backup_dir().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error directorio: {e}")))?;
+    let dir = get_backup_dir().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error directorio: {e}"),
+        )
+    })?;
     let ruta = if archivo.is_empty() {
-        std::path::Path::new(&dir).join(format!("datio_{}.backup", ahora_unix())).to_string_lossy().to_string()
+        std::path::Path::new(&dir)
+            .join(format!("datio_{}.backup", ahora_unix()))
+            .to_string_lossy()
+            .to_string()
     } else {
-        std::path::Path::new(&dir).join(&archivo).to_string_lossy().to_string()
+        std::path::Path::new(&dir)
+            .join(&archivo)
+            .to_string_lossy()
+            .to_string()
     };
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    db.importar_backup(&ruta).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error al restaurar: {e}")))?;
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    db.importar_backup(&ruta).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error al restaurar: {e}"),
+        )
+    })?;
     drop(db);
     let _ = state.tx.send(());
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 // Historico tasas
-async fn api_historico_tasas(State(state): State<AxumAppState>) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
-    let db = state.ledger.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
-    let tasas = db.ultimas_tasas(50).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error interno: {e}")))?;
+async fn api_historico_tasas(
+    State(state): State<AxumAppState>,
+) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let tasas = db.ultimas_tasas(50).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
     let result: Vec<serde_json::Value> = tasas.iter().enumerate().map(|(i, t)| {
         let fuente_len = t.fuente_len as usize;
         let fuente_str = std::str::from_utf8(&t.fuente[..fuente_len]).unwrap_or("BCV");
@@ -1961,12 +3181,15 @@ fn inicializar_negocio(
             "Active al menos un rubro conocido (abasto, panaderia, licoreria)",
         ));
     }
-    let nombre_obj = Nombre::new(&nombre)
-        .map_err(|e| UIError::new("nombre invalido", e))?;
+    let nombre_obj = Nombre::new(&nombre).map_err(|e| UIError::new("nombre invalido", e))?;
 
     let clave = licencia_clave.unwrap_or_default();
     let titular = licencia_titular.unwrap_or_default();
-    let estado_lic = if clave.is_empty() { "demo".to_string() } else { "activa".to_string() };
+    let estado_lic = if clave.is_empty() {
+        "demo".to_string()
+    } else {
+        "activa".to_string()
+    };
 
     // Validate PIN length if provided
     if let Some(ref p) = pin_dueno {
@@ -2030,7 +3253,11 @@ fn validar_clave_licencia(clave: &str, rubros: u16) -> bool {
     if limpio.len() != 16 {
         return false;
     }
-    let digitos: Vec<u16> = limpio.bytes().map(|b| (b - b'0') as u16).filter(|&d| d < 10).collect();
+    let digitos: Vec<u16> = limpio
+        .bytes()
+        .map(|b| (b - b'0') as u16)
+        .filter(|&d| d < 10)
+        .collect();
     if digitos.len() != 16 {
         return false;
     }
@@ -2064,10 +3291,7 @@ fn obtener_licencia(estado: tauri::State<AppState>) -> Result<LicenciaDto, UIErr
 }
 
 #[tauri::command]
-fn validar_licencia(
-    estado: tauri::State<AppState>,
-    clave: String,
-) -> Result<bool, UIError> {
+fn validar_licencia(estado: tauri::State<AppState>, clave: String) -> Result<bool, UIError> {
     let cfg = config_requerida(&estado)?;
     Ok(validar_clave_licencia(&clave, cfg.rubros))
 }
@@ -2094,13 +3318,19 @@ fn crear_producto(estado: tauri::State<AppState>, input: ProductoInput) -> Resul
         stock: decimal_de(&input.stock_inicial)?,
         capacidades: caps,
         categoria_id: input.categoria_id.clone(),
-        precio_bruto_usd: input.precio_bruto_usd.as_deref().and_then(|s| decimal_de(s).ok()),
+        precio_bruto_usd: input
+            .precio_bruto_usd
+            .as_deref()
+            .and_then(|s| decimal_de(s).ok()),
         margen_pct: input.margen_pct.as_deref().and_then(|s| decimal_de(s).ok()),
         sin_stock: input.sin_stock.unwrap_or(false),
         unidad: input.unidad.clone(),
         es_caja: input.es_caja.unwrap_or(false),
         unidades_por_caja: input.unidades_por_caja,
-        precio_paquete_usd: input.precio_paquete_usd.as_deref().and_then(|s| decimal_de(s).ok()),
+        precio_paquete_usd: input
+            .precio_paquete_usd
+            .as_deref()
+            .and_then(|s| decimal_de(s).ok()),
         nombre_paquete: input.nombre_paquete.clone(),
     };
     if producto.sku.as_str().is_empty()
@@ -2121,9 +3351,16 @@ fn crear_producto(estado: tauri::State<AppState>, input: ProductoInput) -> Resul
 #[tauri::command]
 fn listar_productos(estado: tauri::State<AppState>) -> Result<Vec<ProductoDto>, UIError> {
     config_requerida(&estado)?;
-    let db = estado.ledger.lock().map_err(|_| UIError::new("db bloqueada", ""))?;
-    let tree = db.inner_db().open_tree("productos").map_err(|e| UIError::new("error db", &e.to_string()))?;
-    let filas: Vec<ProductoDto> = tree.iter()
+    let db = estado
+        .ledger
+        .lock()
+        .map_err(|_| UIError::new("db bloqueada", ""))?;
+    let tree = db
+        .inner_db()
+        .open_tree("productos")
+        .map_err(|e| UIError::new("error db", &e.to_string()))?;
+    let filas: Vec<ProductoDto> = tree
+        .iter()
         .filter_map(|r| r.ok())
         .filter_map(|(_, v)| {
             bincode::deserialize::<Producto>(&v)
@@ -2197,7 +3434,9 @@ fn registrar_merma(
     if let Some(lid) = lote_id {
         let (_, restante) = con_ledger(&estado, |db| -> Result<(String, Decimal), DbError> {
             let mut libro = db.cargar_lotes()?;
-            let restante = libro.registrar_merma(&lid, cant).map_err(DbError::Negocio)?;
+            let restante = libro
+                .registrar_merma(&lid, cant)
+                .map_err(DbError::Negocio)?;
             Ok((lid.clone(), restante))
         })?;
         con_ledger(&estado, |db| db.actualizar_disponible_lote(&lid, restante))?;
@@ -2280,7 +3519,8 @@ fn registrar_venta(
                 // Return existing ticket
                 let venta_id_clone = venta_id.clone();
                 return con_ledger(&estado, |db| -> Result<TicketDto, DbError> {
-                    let venta = db.cargar_venta(&venta_id_clone)?
+                    let venta = db
+                        .cargar_venta(&venta_id_clone)?
                         .ok_or_else(|| DbError::Negocio(ErrorNegocio::ProductoInexistente))?;
                     Ok(armar_ticket(&venta, recibido, Decimal::ZERO))
                 });
@@ -2305,7 +3545,11 @@ fn registrar_venta(
             } else {
                 cantidad
             };
-            validar_linea(catalogo.capacidades(idx), cant_unidades, catalogo.stock(idx))?;
+            validar_linea(
+                catalogo.capacidades(idx),
+                cant_unidades,
+                catalogo.stock(idx),
+            )?;
             toques.push((idx, cantidad, modo.to_string()));
             let precio_efectivo = if modo == "paquete" && tiene_paquete {
                 match catalogo.precio_paquete_usd(idx) {
@@ -2413,8 +3657,12 @@ fn registrar_venta(
             jornada.ventas_total_bs += total_bs;
             jornada.tickets_emitidos += 1;
             match firmada.estado_vuelto.as_deref() {
-                Some("PAGADO") => { jornada.vuelto_pagado_bs += vuelto; }
-                Some("RETENIDO") => { jornada.vuelto_retenido_bs += vuelto; }
+                Some("PAGADO") => {
+                    jornada.vuelto_pagado_bs += vuelto;
+                }
+                Some("RETENIDO") => {
+                    jornada.vuelto_retenido_bs += vuelto;
+                }
                 _ => {}
             }
             let _ = db.guardar_jornada(&jornada);
@@ -2620,7 +3868,11 @@ fn agregar_consumo(
         } else {
             cant
         };
-        validar_linea(catalogo.capacidades(idx), cant_unidades, catalogo.stock(idx))?;
+        validar_linea(
+            catalogo.capacidades(idx),
+            cant_unidades,
+            catalogo.stock(idx),
+        )?;
 
         let sku_obj = catalogo.sku_obj(idx);
         let precio_efectivo = if modo == "paquete" {
@@ -2769,7 +4021,10 @@ fn cerrar_cuenta(
                 firma_sha256: String::new(),
                 tipo: "saldo_a_favor".to_string(),
                 cliente: cerrada.cliente.clone(),
-                nota: Some(format!("Saldo a favor de ${:.2} generado al cerrar {}", excedente, cerrada.id)),
+                nota: Some(format!(
+                    "Saldo a favor de ${:.2} generado al cerrar {}",
+                    excedente, cerrada.id
+                )),
                 abonos_usd: None,
                 abonos_bs: None,
             };
@@ -2785,8 +4040,12 @@ fn cerrar_cuenta(
                 jornada.deudas_liquidadas_usd += total_neto_usd;
             }
             match cerrada.estado_vuelto.as_deref() {
-                Some("PAGADO") => { jornada.vuelto_pagado_bs += vuelto; }
-                Some("RETENIDO") => { jornada.vuelto_retenido_bs += vuelto; }
+                Some("PAGADO") => {
+                    jornada.vuelto_pagado_bs += vuelto;
+                }
+                Some("RETENIDO") => {
+                    jornada.vuelto_retenido_bs += vuelto;
+                }
                 _ => {}
             }
             let _ = db.guardar_jornada(&jornada);
@@ -2906,13 +4165,17 @@ fn datos_panel(estado: tauri::State<AppState>) -> Result<PanelDto, UIError> {
             let precio_bruto = catalogo.precio_bruto_usd(i).unwrap_or(Decimal::ZERO);
             if precio_venta > Decimal::ZERO {
                 total_venta_usd += precio_venta;
-                total_costo_usd += if precio_bruto > Decimal::ZERO { precio_bruto } else { precio_venta * dec!(0.65) };
+                total_costo_usd += if precio_bruto > Decimal::ZERO {
+                    precio_bruto
+                } else {
+                    precio_venta * dec!(0.65)
+                };
             }
         }
-        let costo_total_usd = if total_venta_usd > Decimal::ZERO { 
-            usd * total_costo_usd / total_venta_usd 
-        } else { 
-            usd * dec!(0.65) 
+        let costo_total_usd = if total_venta_usd > Decimal::ZERO {
+            usd * total_costo_usd / total_venta_usd
+        } else {
+            usd * dec!(0.65)
         };
         let ganancia_bruta_usd = usd - costo_total_usd;
         let impuestos_usd = usd * dec!(0.12);
@@ -2921,15 +4184,18 @@ fn datos_panel(estado: tauri::State<AppState>) -> Result<PanelDto, UIError> {
         let ganancia_neta_bs = ganancia_neta_usd * tasa;
 
         // Deudas y dinero en la calle
-        let deudas_abiertas = cuentas_todas.iter()
-            .filter(|v| v.tipo == "deuda")
-            .count();
-        let dinero_en_la_calle_usd: Decimal = cuentas_todas.iter()
+        let deudas_abiertas = cuentas_todas.iter().filter(|v| v.tipo == "deuda").count();
+        let dinero_en_la_calle_usd: Decimal = cuentas_todas
+            .iter()
             .filter(|v| v.tipo == "deuda")
             .map(|v| {
                 let total = v.lineas.total_usd();
                 let abonos = v.abonos_usd.unwrap_or(Decimal::ZERO);
-                if total > abonos { total - abonos } else { Decimal::ZERO }
+                if total > abonos {
+                    total - abonos
+                } else {
+                    Decimal::ZERO
+                }
             })
             .sum();
         let dinero_en_la_calle_bs = dinero_en_la_calle_usd * tasa;
@@ -2940,31 +4206,57 @@ fn datos_panel(estado: tauri::State<AppState>) -> Result<PanelDto, UIError> {
             std::collections::HashMap::new();
         let mut total_bruto_global: Decimal = Decimal::ZERO;
         for i in 0..catalogo.len() {
-            let cat_id = catalogo.categoria_id(i).unwrap_or_else(|| "cat-general".to_string());
-            let entry = mapa_cats.entry(cat_id.clone()).or_insert((0, Decimal::ZERO, Decimal::ZERO, Decimal::ZERO));
+            let cat_id = catalogo
+                .categoria_id(i)
+                .unwrap_or_else(|| "cat-general".to_string());
+            let entry = mapa_cats.entry(cat_id.clone()).or_insert((
+                0,
+                Decimal::ZERO,
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ));
             entry.0 += 1;
-            let st = if catalogo.sin_stock(i) { Decimal::ZERO } else { catalogo.stock(i) };
-            let bruto_unit = catalogo.precio_bruto_usd(i).unwrap_or(catalogo.precio_usd(i) * dec!(0.65));
+            let st = if catalogo.sin_stock(i) {
+                Decimal::ZERO
+            } else {
+                catalogo.stock(i)
+            };
+            let bruto_unit = catalogo
+                .precio_bruto_usd(i)
+                .unwrap_or(catalogo.precio_usd(i) * dec!(0.65));
             let venta_unit = catalogo.precio_usd(i);
             entry.1 += st;
             entry.2 += st * bruto_unit;
             entry.3 += st * venta_unit;
             total_bruto_global += st * bruto_unit;
         }
-        let cat_nombre_map: std::collections::HashMap<String, String> = categorias.iter()
+        let cat_nombre_map: std::collections::HashMap<String, String> = categorias
+            .iter()
             .map(|c| (c.id.clone(), c.nombre.clone()))
             .collect();
-        let mut dinero_por_categoria: Vec<CategoriaDineroBrutoDto> = mapa_cats.into_iter()
+        let mut dinero_por_categoria: Vec<CategoriaDineroBrutoDto> = mapa_cats
+            .into_iter()
             .filter(|(_, (n, _, b, _))| *n > 0 || *b > Decimal::ZERO)
             .map(|(cat_id, (cant_prod, unidades, bruto, venta))| {
-                let nombre = cat_nombre_map.get(&cat_id).cloned().unwrap_or_else(|| "General".to_string());
-                let margen = if venta > bruto { venta - bruto } else { Decimal::ZERO };
+                let nombre = cat_nombre_map
+                    .get(&cat_id)
+                    .cloned()
+                    .unwrap_or_else(|| "General".to_string());
+                let margen = if venta > bruto {
+                    venta - bruto
+                } else {
+                    Decimal::ZERO
+                };
                 let margen_pct = if venta > Decimal::ZERO {
                     format!("{:.1}", margen / venta * dec!(100))
-                } else { "0.0".to_string() };
+                } else {
+                    "0.0".to_string()
+                };
                 let pct_cap = if total_bruto_global > Decimal::ZERO {
                     format!("{:.1}", bruto / total_bruto_global * dec!(100))
-                } else { "0.0".to_string() };
+                } else {
+                    "0.0".to_string()
+                };
                 CategoriaDineroBrutoDto {
                     categoria_id: cat_id,
                     nombre,
@@ -3041,10 +4333,7 @@ fn establecer_tasa_manual(
 }
 
 #[tauri::command]
-fn fijar_tasa_manual(
-    state: tauri::State<AppState>,
-    tasa: String,
-) -> Result<TasaInfo, UIError> {
+fn fijar_tasa_manual(state: tauri::State<AppState>, tasa: String) -> Result<TasaInfo, UIError> {
     let valor = Decimal::from_str(&tasa.trim().replace(',', "."))
         .map_err(|_| UIError::new("tasa invalida", "Formato decimal invalido"))?;
     let resultado = state.servicio_tasa.establecer_tasa_manual(valor);
@@ -3194,12 +4483,18 @@ fn listar_backups(
     for meta in metas {
         let ruta =
             std::path::Path::new(&directorio).join(format!("datio_{}.backup", meta.timestamp_unix));
-        let archivo_nombre = ruta.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let archivo_nombre = ruta
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         let id = archivo_nombre.replace(".backup", "");
         let fecha = chrono::DateTime::from_timestamp(meta.timestamp_unix, 0)
             .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
             .unwrap_or_default();
-        let tamano_kb = std::fs::metadata(&ruta).map(|m| m.len() / 1024).unwrap_or(0);
+        let tamano_kb = std::fs::metadata(&ruta)
+            .map(|m| m.len() / 1024)
+            .unwrap_or(0);
         infos.push(RespaldoInfo {
             id,
             fecha,
@@ -3237,9 +4532,12 @@ fn get_backup_dir() -> Result<String, UIError> {
     let base_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+        .unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        });
     let dir = base_dir.join("Respaldos");
-    std::fs::create_dir_all(&dir).map_err(|e| UIError::new("error creando directorio de respaldos", &e.to_string()))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| UIError::new("error creando directorio de respaldos", &e.to_string()))?;
     Ok(dir.to_string_lossy().to_string())
 }
 
@@ -3252,7 +4550,10 @@ fn listar_categorias(estado: tauri::State<AppState>) -> Result<Vec<Categoria>, U
 }
 
 #[tauri::command]
-fn crear_categoria(estado: tauri::State<AppState>, nombre: String) -> Result<Vec<Categoria>, UIError> {
+fn crear_categoria(
+    estado: tauri::State<AppState>,
+    nombre: String,
+) -> Result<Vec<Categoria>, UIError> {
     config_requerida(&estado)?;
     let nombre = nombre.trim().to_string();
     if nombre.is_empty() || nombre.len() > 32 {
@@ -3268,7 +4569,10 @@ fn crear_categoria(estado: tauri::State<AppState>, nombre: String) -> Result<Vec
 }
 
 #[tauri::command]
-fn eliminar_categoria(estado: tauri::State<AppState>, id: String) -> Result<Vec<Categoria>, UIError> {
+fn eliminar_categoria(
+    estado: tauri::State<AppState>,
+    id: String,
+) -> Result<Vec<Categoria>, UIError> {
     config_requerida(&estado)?;
     con_ledger(&estado, |db| db.eliminar_categoria(&id))?;
     notificar_panel(&estado);
@@ -3308,7 +4612,10 @@ fn crear_tasa_impuesto(
 }
 
 #[tauri::command]
-fn eliminar_tasa_impuesto(estado: tauri::State<AppState>, id: String) -> Result<Vec<TasaImpuesto>, UIError> {
+fn eliminar_tasa_impuesto(
+    estado: tauri::State<AppState>,
+    id: String,
+) -> Result<Vec<TasaImpuesto>, UIError> {
     config_requerida(&estado)?;
     con_ledger(&estado, |db| db.eliminar_tasa_impuesto(&id))?;
     notificar_panel(&estado);
@@ -3332,7 +4639,10 @@ fn crear_metodo_pago(
     config_requerida(&estado)?;
     let nombre = nombre.trim().to_uppercase().to_string();
     if nombre.is_empty() || nombre.len() > 25 {
-        return Err(UIError::new("nombre invalido", "1-25 caracteres, solo alfanumerico"));
+        return Err(UIError::new(
+            "nombre invalido",
+            "1-25 caracteres, solo alfanumerico",
+        ));
     }
     if moneda != "USD" && moneda != "BS" {
         return Err(UIError::new("moneda invalida", "USD o BS"));
@@ -3344,11 +4654,17 @@ fn crear_metodo_pago(
 }
 
 #[tauri::command]
-fn eliminar_metodo_pago(estado: tauri::State<AppState>, nombre: String) -> Result<Vec<MetodoPagoConfig>, UIError> {
+fn eliminar_metodo_pago(
+    estado: tauri::State<AppState>,
+    nombre: String,
+) -> Result<Vec<MetodoPagoConfig>, UIError> {
     config_requerida(&estado)?;
     let metodos = con_ledger(&estado, |db| db.listar_metodos_pago())?;
     if metodos.len() <= 1 {
-        return Err(UIError::new("no permitido", "Debe existir al menos un metodo de pago"));
+        return Err(UIError::new(
+            "no permitido",
+            "Debe existir al menos un metodo de pago",
+        ));
     }
     con_ledger(&estado, |db| db.eliminar_metodo_pago(&nombre))?;
     notificar_panel(&estado);
@@ -3364,7 +4680,10 @@ fn listar_operadores(estado: tauri::State<AppState>) -> Result<Vec<Operador>, UI
 }
 
 #[tauri::command]
-fn crear_operador(estado: tauri::State<AppState>, nombre: String) -> Result<Vec<Operador>, UIError> {
+fn crear_operador(
+    estado: tauri::State<AppState>,
+    nombre: String,
+) -> Result<Vec<Operador>, UIError> {
     config_requerida(&estado)?;
     let nombre = nombre.trim().to_string();
     if nombre.is_empty() || nombre.len() > 30 {
@@ -3382,7 +4701,11 @@ fn crear_operador(estado: tauri::State<AppState>, nombre: String) -> Result<Vec<
 }
 
 #[tauri::command]
-fn editar_operador(estado: tauri::State<AppState>, id: String, nombre: String) -> Result<Vec<Operador>, UIError> {
+fn editar_operador(
+    estado: tauri::State<AppState>,
+    id: String,
+    nombre: String,
+) -> Result<Vec<Operador>, UIError> {
     config_requerida(&estado)?;
     let nombre = nombre.trim().to_string();
     if nombre.is_empty() || nombre.len() > 30 {
@@ -3426,7 +4749,10 @@ fn listar_dispositivos(estado: tauri::State<AppState>) -> Result<Vec<Dispositivo
 }
 
 #[tauri::command]
-fn registrar_dispositivo(estado: tauri::State<AppState>, nombre: String) -> Result<Vec<DispositivoRemoto>, UIError> {
+fn registrar_dispositivo(
+    estado: tauri::State<AppState>,
+    nombre: String,
+) -> Result<Vec<DispositivoRemoto>, UIError> {
     config_requerida(&estado)?;
     let d = DispositivoRemoto {
         id: format!("dev-{}", Uuid::new_v4().to_string()[..8].to_string()),
@@ -3441,7 +4767,10 @@ fn registrar_dispositivo(estado: tauri::State<AppState>, nombre: String) -> Resu
 }
 
 #[tauri::command]
-fn revocar_dispositivo(estado: tauri::State<AppState>, id: String) -> Result<Vec<DispositivoRemoto>, UIError> {
+fn revocar_dispositivo(
+    estado: tauri::State<AppState>,
+    id: String,
+) -> Result<Vec<DispositivoRemoto>, UIError> {
     config_requerida(&estado)?;
     con_ledger(&estado, |db| db.eliminar_dispositivo(&id))?;
     notificar_panel(&estado);
@@ -3461,8 +4790,14 @@ struct SemaforoDto {
 fn obtener_semaforo_stock(estado: tauri::State<AppState>) -> Result<SemaforoDto, UIError> {
     config_requerida(&estado)?;
     let s = con_ledger(&estado, |db| db.cargar_semaforo())?;
-    Ok(s.map(|v| SemaforoDto { rojo_max: v.rojo_max, amarillo_max: v.amarillo_max })
-       .unwrap_or(SemaforoDto { rojo_max: 5, amarillo_max: 15 }))
+    Ok(s.map(|v| SemaforoDto {
+        rojo_max: v.rojo_max,
+        amarillo_max: v.amarillo_max,
+    })
+    .unwrap_or(SemaforoDto {
+        rojo_max: 5,
+        amarillo_max: 15,
+    }))
 }
 
 #[tauri::command]
@@ -3473,12 +4808,21 @@ fn guardar_semaforo_stock(
 ) -> Result<SemaforoDto, UIError> {
     config_requerida(&estado)?;
     if rojo_max < 1 || amarillo_max <= rojo_max {
-        return Err(UIError::new("valores invalidos", "Rojo >= 1, amarillo > rojo"));
+        return Err(UIError::new(
+            "valores invalidos",
+            "Rojo >= 1, amarillo > rojo",
+        ));
     }
-    let s = SemaforoStock { rojo_max, amarillo_max };
+    let s = SemaforoStock {
+        rojo_max,
+        amarillo_max,
+    };
     con_ledger(&estado, |db| db.guardar_semaforo(&s))?;
     notificar_panel(&estado);
-    Ok(SemaforoDto { rojo_max, amarillo_max })
+    Ok(SemaforoDto {
+        rojo_max,
+        amarillo_max,
+    })
 }
 
 // ---------------- comandos: cambiar PIN ----------------
@@ -3494,7 +4838,10 @@ fn cambiar_pin_dueno(
         .ok_or_else(|| UIError::new("negocio sin inicializar", "Ejecute el asistente"))?;
     if !cfg.pin_dueno_sha256.is_empty() {
         if cfg.pin_dueno_sha256 != hash_pin(&pin_anterior) {
-            return Err(UIError::new("pin incorrecto", "La clave anterior no coincide"));
+            return Err(UIError::new(
+                "pin incorrecto",
+                "La clave anterior no coincide",
+            ));
         }
     }
     // Validate new PIN length
@@ -3520,9 +4867,16 @@ fn cambiar_pin_dueno(
 fn eliminar_producto(estado: tauri::State<AppState>, sku: String) -> Result<(), UIError> {
     config_requerida(&estado)?;
     let sku_norm = sku.trim().to_uppercase();
-    let db = estado.ledger.lock().map_err(|_| UIError::new("db bloqueada", ""))?;
-    let tree = db.inner_db().open_tree("productos").map_err(|e| UIError::new("error db", &e.to_string()))?;
-    tree.remove(sku_norm.as_bytes()).map_err(|e| UIError::new("error eliminando", &e.to_string()))?;
+    let db = estado
+        .ledger
+        .lock()
+        .map_err(|_| UIError::new("db bloqueada", ""))?;
+    let tree = db
+        .inner_db()
+        .open_tree("productos")
+        .map_err(|e| UIError::new("error db", &e.to_string()))?;
+    tree.remove(sku_norm.as_bytes())
+        .map_err(|e| UIError::new("error eliminando", &e.to_string()))?;
     drop(db);
     notificar_panel(&estado);
     Ok(())
@@ -3583,11 +4937,18 @@ fn abrir_jornada(
     let tasa = tasa_viva(&estado)?;
     let actual = con_ledger(&estado, |db| db.jornada_actual())?;
     if actual.is_some() {
-        return Err(UIError::new("jornada abierta", "Ya existe una jornada laboral abierta"));
+        return Err(UIError::new(
+            "jornada abierta",
+            "Ya existe una jornada laboral abierta",
+        ));
     }
     let ops = operadores.unwrap_or_default();
     let jornada = Jornada {
-        id: format!("JOR-{}-{}", chrono::Utc::now().format("%Y%m%d"), Uuid::new_v4().to_string()[..6].to_uppercase()),
+        id: format!(
+            "JOR-{}-{}",
+            chrono::Utc::now().format("%Y%m%d"),
+            Uuid::new_v4().to_string()[..6].to_uppercase()
+        ),
         estado: "abierta".to_string(),
         inicio_unix: ahora_unix(),
         fin_unix: None,
@@ -3684,7 +5045,9 @@ fn eliminar_consumo(
         let mut venta = db
             .cargar_venta(&venta_id)?
             .filter(|v| v.es_cuenta_abierta && v.estado == EstadoVenta::Abierta)
-            .ok_or(DbError::Negocio(ErrorNegocio::CuentaInvalida(venta_id.clone())))?;
+            .ok_or(DbError::Negocio(ErrorNegocio::CuentaInvalida(
+                venta_id.clone(),
+            )))?;
         if consumo_idx >= venta.lineas.skus.len() {
             return Err(DbError::Negocio(ErrorNegocio::CuentaInvalida(venta_id)));
         }
@@ -3696,10 +5059,13 @@ fn eliminar_consumo(
         venta.lineas.precios_usd.remove(consumo_idx);
         venta.lineas.tasas_bloqueadas.remove(consumo_idx);
         let tree_p = db.inner_db().open_tree("productos")?;
-        let sin_stock = tree_p.get(sku.as_bytes())?
-            .and_then(|v| bincode::deserialize::<Producto>(&v)
-                .or_else(|_| serde_json::from_slice::<Producto>(&v))
-                .ok())
+        let sin_stock = tree_p
+            .get(sku.as_bytes())?
+            .and_then(|v| {
+                bincode::deserialize::<Producto>(&v)
+                    .or_else(|_| serde_json::from_slice::<Producto>(&v))
+                    .ok()
+            })
             .map(|p| p.sin_stock)
             .unwrap_or(false);
         if !sin_stock {
@@ -3728,8 +5094,12 @@ fn abonar_cuenta(
     monto_bs: Option<f64>,
 ) -> Result<CuentaDto, UIError> {
     config_requerida(&estado)?;
-    let usd = monto_usd.map(|v| Decimal::try_from(v).unwrap_or(Decimal::ZERO)).unwrap_or(Decimal::ZERO);
-    let bs = monto_bs.map(|v| Decimal::try_from(v).unwrap_or(Decimal::ZERO)).unwrap_or(Decimal::ZERO);
+    let usd = monto_usd
+        .map(|v| Decimal::try_from(v).unwrap_or(Decimal::ZERO))
+        .unwrap_or(Decimal::ZERO);
+    let bs = monto_bs
+        .map(|v| Decimal::try_from(v).unwrap_or(Decimal::ZERO))
+        .unwrap_or(Decimal::ZERO);
     let actualizada = con_ledger(&estado, |db| {
         let mut venta = db
             .cargar_venta(&venta_id)?
@@ -3777,7 +5147,10 @@ fn editar_abono_cuenta(
 fn listar_ventas(estado: tauri::State<AppState>) -> Result<Vec<TicketDto>, UIError> {
     config_requerida(&estado)?;
     let ventas = con_ledger(&estado, |db| db.ventas_recientes(200))?;
-    Ok(ventas.iter().map(|v| armar_ticket(v, v.monto_recibido_bs, v.vuelto_bs)).collect())
+    Ok(ventas
+        .iter()
+        .map(|v| armar_ticket(v, v.monto_recibido_bs, v.vuelto_bs))
+        .collect())
 }
 
 // ---------------- comandos: historico tasas ----------------
@@ -3792,21 +5165,31 @@ struct RegistroHistoricoTasa {
 }
 
 #[tauri::command]
-fn listar_historico_tasas(estado: tauri::State<AppState>) -> Result<Vec<RegistroHistoricoTasa>, UIError> {
+fn listar_historico_tasas(
+    estado: tauri::State<AppState>,
+) -> Result<Vec<RegistroHistoricoTasa>, UIError> {
     config_requerida(&estado)?;
     let tasas = con_ledger(&estado, |db| db.ultimas_tasas(50))?;
-    Ok(tasas.iter().enumerate().map(|(i, t)| RegistroHistoricoTasa {
-        id: format!("tasa-{}", i),
-        valor: t.valor_bs_por_usd.to_string(),
-        fecha_hora: chrono::DateTime::from_timestamp(t.fecha_unix, 0)
-            .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
-            .unwrap_or_default(),
-        tipo: {
-            let fuente_len = t.fuente_len as usize;
-            let fuente_str = std::str::from_utf8(&t.fuente[..fuente_len]).unwrap_or("BCV");
-            if fuente_str == "MANUAL" { "manual".to_string() } else { "automatico".to_string() }
-        },
-    }).collect())
+    Ok(tasas
+        .iter()
+        .enumerate()
+        .map(|(i, t)| RegistroHistoricoTasa {
+            id: format!("tasa-{}", i),
+            valor: t.valor_bs_por_usd.to_string(),
+            fecha_hora: chrono::DateTime::from_timestamp(t.fecha_unix, 0)
+                .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+                .unwrap_or_default(),
+            tipo: {
+                let fuente_len = t.fuente_len as usize;
+                let fuente_str = std::str::from_utf8(&t.fuente[..fuente_len]).unwrap_or("BCV");
+                if fuente_str == "MANUAL" {
+                    "manual".to_string()
+                } else {
+                    "automatico".to_string()
+                }
+            },
+        })
+        .collect())
 }
 
 // ---------------- comandos: respaldos (aliases) ----------------
@@ -3819,12 +5202,18 @@ fn crear_respaldo(estado: tauri::State<AppState>) -> Result<RespaldoInfo, UIErro
     let ruta_str = ruta.to_string_lossy().to_string();
     let payload = BackupRuta { ruta: ruta_str };
     let meta = exportar_backup(estado, payload)?;
-    let archivo_nombre = ruta.file_name().unwrap_or_default().to_string_lossy().to_string();
+    let archivo_nombre = ruta
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
     let id = archivo_nombre.replace(".backup", "");
     let fecha = chrono::DateTime::from_timestamp(meta.timestamp_unix, 0)
         .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
         .unwrap_or_default();
-    let tamano_kb = std::fs::metadata(&ruta).map(|m| m.len() / 1024).unwrap_or(0);
+    let tamano_kb = std::fs::metadata(&ruta)
+        .map(|m| m.len() / 1024)
+        .unwrap_or(0);
     Ok(RespaldoInfo {
         id,
         fecha,
@@ -3838,18 +5227,34 @@ fn crear_respaldo(estado: tauri::State<AppState>) -> Result<RespaldoInfo, UIErro
 #[tauri::command]
 fn listar_respaldos(estado: tauri::State<AppState>) -> Result<Vec<RespaldoInfo>, UIError> {
     let dir = get_backup_dir()?;
-    let ledger = estado.ledger.lock().map_err(|e| UIError::new("lock", &e.to_string()))?;
-    let metas = ledger.listar_backups(&dir).map_err(|e| UIError::new("error listando respaldos", &e.to_string()))?;
+    let ledger = estado
+        .ledger
+        .lock()
+        .map_err(|e| UIError::new("lock", &e.to_string()))?;
+    let metas = ledger
+        .listar_backups(&dir)
+        .map_err(|e| UIError::new("error listando respaldos", &e.to_string()))?;
     let mut infos = Vec::new();
     for meta in metas {
         let fecha = chrono::DateTime::from_timestamp(meta.timestamp_unix, 0)
             .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
             .unwrap_or_default();
-        let archivo_nombre = format!("{}.backup", meta.timestamp_unix);
-        let ruta = std::path::Path::new(&dir).join(&archivo_nombre);
-        let tamano_kb = std::fs::metadata(&ruta).ok().map(|m| m.len() / 1024).unwrap_or(0);
+        let nombre_con_prefijo = format!("datio_{}.backup", meta.timestamp_unix);
+        let ruta_con_prefijo = std::path::Path::new(&dir).join(&nombre_con_prefijo);
+        let (archivo_nombre, ruta) = if ruta_con_prefijo.exists() {
+            (nombre_con_prefijo, ruta_con_prefijo)
+        } else {
+            let nombre_simple = format!("{}.backup", meta.timestamp_unix);
+            let ruta_simple = std::path::Path::new(&dir).join(&nombre_simple);
+            (nombre_simple, ruta_simple)
+        };
+        let id = archivo_nombre.replace(".backup", "");
+        let tamano_kb = std::fs::metadata(&ruta)
+            .ok()
+            .map(|m| m.len() / 1024)
+            .unwrap_or(0);
         infos.push(RespaldoInfo {
-            id: fecha.clone(),
+            id,
             fecha,
             archivo_nombre,
             registros: meta.total_registros,
@@ -3951,7 +5356,13 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 let cors = CorsLayer::new()
                     .allow_origin(Any)
-                    .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+                    .allow_methods([
+                        Method::GET,
+                        Method::POST,
+                        Method::PUT,
+                        Method::DELETE,
+                        Method::OPTIONS,
+                    ])
                     .allow_headers(Any)
                     .allow_credentials(true);
 
@@ -3964,7 +5375,10 @@ pub fn run() {
                     .route("/api/cuentas", get(api_cuentas))
                     .route("/api/cuentas", post(api_cuentas_abrir))
                     .route("/api/cuentas/:id/consumo", post(api_cuentas_consumo))
-                    .route("/api/cuentas/:id/consumo/:idx", delete(api_cuentas_eliminar_consumo))
+                    .route(
+                        "/api/cuentas/:id/consumo/:idx",
+                        delete(api_cuentas_eliminar_consumo),
+                    )
                     .route("/api/cuentas/:id/abonar", post(api_cuentas_abonar))
                     .route("/api/cuentas/:id/cerrar", post(api_cuentas_cerrar))
                     .route("/api/productos", get(api_productos))
@@ -3980,15 +5394,24 @@ pub fn run() {
                     .route("/api/categorias/:id", delete(api_categorias_eliminar))
                     .route("/api/tasas-impuestos", get(api_tasas_impuestos_listar))
                     .route("/api/tasas-impuestos", post(api_tasas_impuestos_crear))
-                    .route("/api/tasas-impuestos/:id", delete(api_tasas_impuestos_eliminar))
+                    .route(
+                        "/api/tasas-impuestos/:id",
+                        delete(api_tasas_impuestos_eliminar),
+                    )
                     .route("/api/metodos-pago", get(api_metodos_pago_listar))
                     .route("/api/metodos-pago", post(api_metodos_pago_crear))
-                    .route("/api/metodos-pago/:nombre", delete(api_metodos_pago_eliminar))
+                    .route(
+                        "/api/metodos-pago/:nombre",
+                        delete(api_metodos_pago_eliminar),
+                    )
                     .route("/api/operadores", get(api_operadores_listar))
                     .route("/api/operadores", post(api_operadores_crear))
                     .route("/api/operadores/:id", put(api_operadores_editar))
                     .route("/api/operadores/:id", delete(api_operadores_eliminar))
-                    .route("/api/operadores/:id/alternar", post(api_operadores_alternar))
+                    .route(
+                        "/api/operadores/:id/alternar",
+                        post(api_operadores_alternar),
+                    )
                     .route("/api/jornadas", get(api_jornadas_listar))
                     .route("/api/jornadas/actual", get(api_jornada_actual))
                     .route("/api/jornadas/abrir", post(api_jornadas_abrir))
@@ -4011,8 +5434,8 @@ pub fn run() {
                         auth_middleware,
                     ));
 
-                let spa_dist_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../ui/dist");
+                let spa_dist_path =
+                    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ui/dist");
                 let public = Router::new()
                     .route("/api/auth/login", post(api_auth_login))
                     .route("/api/auth/logout", post(api_auth_logout))
@@ -4020,7 +5443,9 @@ pub fn run() {
                     .route("/panel", get(serve_panel_html))
                     .route("/api/spa", get(api_spa_content))
                     .route("/api/config", get(api_config))
-                    .fallback_service(ServeDir::new(spa_dist_path).append_index_html_on_directories(false));
+                    .fallback_service(
+                        ServeDir::new(spa_dist_path).append_index_html_on_directories(false),
+                    );
 
                 let app = Router::new()
                     .merge(public)
@@ -4035,7 +5460,9 @@ pub fn run() {
                         rate_limiter: RateLimiter::new(5, 300), // 5 intentos, lockout 5 minutos
                     });
 
-                if let Ok(listener) = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", SERVIDOR_PORT)).await {
+                if let Ok(listener) =
+                    tokio::net::TcpListener::bind(format!("0.0.0.0:{}", SERVIDOR_PORT)).await
+                {
                     // Try UPnP for automatic port forwarding
                     let upnp_ip = try_upnp(SERVIDOR_PORT).await;
                     if let Some(ref ip) = upnp_ip {
@@ -4047,7 +5474,7 @@ pub fn run() {
                     } else {
                         println!("[UPnP] Could not set up port forwarding");
                     }
-                    
+
                     println!("[Server] Listening on 0.0.0.0:{}", SERVIDOR_PORT);
                     let _ = axum::serve(listener, app).await;
                 }
