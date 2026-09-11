@@ -1,4 +1,5 @@
 import { api, Categoria, CategoriaDineroBruto, JornadaLaboral, MonedaMetodo, PanelDatos, ProductoInfo, RespaldoInfo, Ticket } from './api';
+import { formatDateVet, formatFechaHoraVet } from './dateUtils';
 import { confirmarAccion, pedirValor } from './dialogs';
 import { NegocioModel } from './NegocioModel';
 
@@ -203,7 +204,7 @@ export class PanelDuenoView {
         const pagina = lista.slice(inicio, inicio + this.POR_PAGINA_TRX);
 
         return pagina.map((t) => {
-            const fechaStr = t.fechaHora || 'Reciente';
+            const fechaStr = t.fechaUnix ? formatFechaHoraVet(t.fechaUnix) : (t.fechaHora || 'Reciente');
             const esCta = t.ventaId.startsWith('CTA-');
             const canal = esCta ? 'Cuenta Abierta' : 'Caja Directa';
             return `
@@ -242,13 +243,9 @@ export class PanelDuenoView {
 
         const ahora = new Date();
         const hace24h = new Date(ahora.getTime() - 86400000);
-        const fmtFechaHora = (d: Date) => d.toLocaleString('es-VE', {
-            year: 'numeric', month: '2-digit', day: '2-digit',
-            hour: '2-digit', minute: '2-digit',
-        });
 
         if (!this.rangoDetalleFechas) {
-            this.rangoDetalleFechas = `Del ${fmtFechaHora(hace24h)} al ${fmtFechaHora(ahora)}`;
+            this.rangoDetalleFechas = `Del ${formatDateVet(hace24h)} al ${formatDateVet(ahora)}`;
         }
 
         const inventarioBs = this.modelo.bs(datos.valorInventarioUsd);

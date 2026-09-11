@@ -680,11 +680,11 @@ export class InventarioView {
             const st = Number(p.stock);
             const badgeClass = p.sinStock
                 ? 'bg-purple-100 text-purple-900'
-                : st > 15
-                ? 'bg-green-100 text-green-900'
-                : st >= 10
+                : st <= this.semaforoStock.rojoMax
+                ? 'bg-red-100 text-red-900'
+                : st <= this.semaforoStock.amarilloMax
                 ? 'bg-yellow-100 text-yellow-900'
-                : 'bg-red-100 text-red-900';
+                : 'bg-green-100 text-green-900';
             const unitLabel = this.getUnitLabel(p);
             const catNombre = this.getNombreCategoria(p.categoriaId);
             const privacidad = this.modelo.getConfig()?.privacidadInventario;

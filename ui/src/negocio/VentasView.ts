@@ -30,9 +30,29 @@ const duracion = (j: JornadaLaboral): string => {
 
 const exportarJornadaCsv = (j: JornadaLaboral, tickets: Ticket[]): void => {
     const operadores = j.operadoresRelevo.length > 0 ? j.operadoresRelevo.join(' / ') : j.operadorActual;
-    const ticketsDeJornada = tickets.filter((t) =>
-        t.operador && j.operadoresRelevo.some((op) => t.operador === op)
-    );
+    const ticketsDeJornada = tickets.filter((t) => {
+        const ts = t.fechaUnix && t.fechaUnix > 0
+            ? t.fechaUnix
+            : (() => {
+                const m = (t.fechaHora || '').match(/(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2}):(\d{2})/);
+                if (m && m[1] && m[2] && m[3] && m[4] && m[5] && m[6]) {
+                    const parsed = Date.UTC(
+                        parseInt(m[1], 10),
+                        parseInt(m[2], 10) - 1,
+                        parseInt(m[3], 10),
+                        parseInt(m[4], 10),
+                        parseInt(m[5], 10),
+                        parseInt(m[6], 10),
+                    );
+                    if (!isNaN(parsed)) return Math.floor(parsed / 1000);
+                }
+                return 0;
+            })();
+        if (ts <= 0) return false;
+        if (ts < j.inicioUnix) return false;
+        if (j.finUnix && ts > j.finUnix) return false;
+        return true;
+    });
 
     const encabezadoJornada = [
         ['INFORME DE JORNADA', j.id],
