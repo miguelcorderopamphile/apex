@@ -915,6 +915,59 @@ async fn api_cuentas_abonar(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
+async fn api_cuentas_convertir_deuda(
+    State(state): State<AxumAppState>,
+    Path(id): Path<String>,
+    Json(body): Json<HashMap<String, serde_json::Value>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let cliente = body
+        .get("cliente")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let nota = body
+        .get("nota")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string());
+    let db = state.ledger.lock().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    let mut venta = db
+        .cargar_venta(&id)
+        .ok()
+        .flatten()
+        .filter(|v| v.es_cuenta_abierta && v.estado == datiolabs_core::models::EstadoVenta::Abierta)
+        .ok_or((StatusCode::NOT_FOUND, "Recurso no encontrado".to_string()))?;
+
+    venta.tipo = "deuda".to_string();
+    if let Some(c) = cliente {
+        venta.etiqueta = c.clone();
+        venta.cliente = Some(c);
+    }
+    if nota.is_some() {
+        venta.nota = nota;
+    }
+    let guardada = db.guardar_venta(venta).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error interno: {e}"),
+        )
+    })?;
+    drop(db);
+    let _ = state.tx.send(());
+    Ok(Json(serde_json::to_value(cuenta_dto(&guardada)).map_err(
+        |e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error de serialización: {e}"),
+            )
+        },
+    )?))
+}
+
 async fn api_cuentas_cerrar(
     State(state): State<AxumAppState>,
     Path(id): Path<String>,
@@ -5141,6 +5194,34 @@ fn editar_abono_cuenta(
     Ok(cuenta_dto(&actualizada))
 }
 
+#[tauri::command]
+fn convertir_cuenta_a_deuda(
+    estado: tauri::State<AppState>,
+    venta_id: String,
+    cliente: String,
+    nota: Option<String>,
+) -> Result<CuentaDto, UIError> {
+    config_requerida(&estado)?;
+    let actualizada = con_ledger(&estado, |db| {
+        let mut venta = db
+            .cargar_venta(&venta_id)?
+            .filter(|v| v.es_cuenta_abierta && v.estado == EstadoVenta::Abierta)
+            .ok_or(DbError::Negocio(ErrorNegocio::CuentaInvalida(venta_id)))?;
+        venta.tipo = "deuda".to_string();
+        let c = cliente.trim().to_string();
+        if !c.is_empty() {
+            venta.etiqueta = c.clone();
+            venta.cliente = Some(c);
+        }
+        if let Some(n) = nota {
+            venta.nota = Some(n.trim().to_string());
+        }
+        db.guardar_venta(venta)
+    })?;
+    notificar_panel(&estado);
+    Ok(cuenta_dto(&actualizada))
+}
+
 // ---------------- comandos: listar ventas ----------------
 
 #[tauri::command]
@@ -5380,6 +5461,10 @@ pub fn run() {
                         delete(api_cuentas_eliminar_consumo),
                     )
                     .route("/api/cuentas/:id/abonar", post(api_cuentas_abonar))
+                    .route(
+                        "/api/cuentas/:id/convertir-deuda",
+                        post(api_cuentas_convertir_deuda),
+                    )
                     .route("/api/cuentas/:id/cerrar", post(api_cuentas_cerrar))
                     .route("/api/productos", get(api_productos))
                     .route("/api/productos", post(api_productos_crear))
@@ -5544,6 +5629,7 @@ pub fn run() {
             eliminar_consumo,
             abonar_cuenta,
             editar_abono_cuenta,
+            convertir_cuenta_a_deuda,
             listar_ventas,
             listar_historico_tasas,
             crear_respaldo,

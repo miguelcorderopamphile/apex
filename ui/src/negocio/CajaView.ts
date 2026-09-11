@@ -1,5 +1,7 @@
 import { api, CAP_PESABLE, MetodoPagoConfig, MonedaMetodo, PagoTicket, parseNum, ResolucionVuelto, Ticket } from './api';
 import { CajaViewModel } from './CajaViewModel';
+import { confirmarAccion, pedirValor } from './dialogs';
+import { abrirModalHistorialTurno } from './historialTurno';
 import { NegocioModel } from './NegocioModel';
 
 const fmt = (n: number | string | undefined | null): string =>
@@ -54,6 +56,9 @@ export class CajaView {
                         <span class="text-[10px] font-bold text-gray-500 uppercase">Caja Directa</span>
                     </div>
                     <div class="flex items-center gap-1.5">
+                        <button id="btn-historial-turno-caja" title="Ver historial de tickets y recaudación de la jornada activa" class="inline-flex items-center gap-1 text-[11px] font-heading font-black bg-gray-100 text-brand-black border border-brand-black hover:bg-gray-200 px-2 py-1 rounded shadow-brutal-sm transition-transform active:translate-y-0.5">
+                            HISTORIAL
+                        </button>
                         <button id="btn-gestionar-operadores-caja" title="Asignar o relevar cajero en turno" class="inline-flex items-center gap-1 text-[11px] font-heading font-black bg-purple-100 text-brand-purple border border-brand-purple hover:bg-purple-200 px-2 py-1 rounded">
                             <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                             <span id="caja-operadores-activo-texto" class="truncate max-w-[130px]">Operador en caja</span>
@@ -97,6 +102,9 @@ export class CajaView {
             this.vm.vaciar();
         });
         document.getElementById('caja-cobrar')?.addEventListener('click', () => void this.abrirModalCobro());
+        document.getElementById('btn-historial-turno-caja')?.addEventListener('click', () => {
+            void abrirModalHistorialTurno(this.modal);
+        });
         document.getElementById('btn-gestionar-operadores-caja')?.addEventListener('click', () => void (async () => {
             const j = await api.obtenerJornadaActual();
             if (j === null) {
@@ -227,7 +235,7 @@ export class CajaView {
                 btn.addEventListener('click', async () => {
                     const id = btn.dataset.cajeroEdit || '';
                     const nom = btn.dataset.cajeroNom || '';
-                    const nuevo = window.prompt('Modificar nombre del operador:', nom);
+                    const nuevo = await pedirValor('Modificar nombre del operador:', nom, 'EDITAR OPERADOR');
                     if (nuevo && nuevo.trim() && nuevo.trim() !== nom) {
                         await api.editarOperador(id, nuevo.trim());
                         this.cerrarModal();
@@ -242,7 +250,7 @@ export class CajaView {
                 btn.addEventListener('click', async () => {
                     const id = btn.dataset.cajeroDel || '';
                     const nom = btn.dataset.cajeroNom || '';
-                    if (window.confirm(`¿Confirmas eliminar al operador "${nom}"?`)) {
+                    if (await confirmarAccion(`¿Confirmas eliminar al operador "${nom}"?`, 'ELIMINAR OPERADOR')) {
                         await api.eliminarOperador(id);
                         this.cerrarModal();
                         void this.abrirModalOperadoresCaja();
@@ -478,6 +486,99 @@ export class CajaView {
             };
         };
 
+        const generarBalanceHtml = (tActual: ReturnType<typeof calcularTotales>) => {
+            const cfgMetodoVuelto = metodosDisponibles.find((m) => m.nombre === metodoVuelto);
+            const metodoVueltoEsUsd = cfgMetodoVuelto?.moneda === 'USD';
+            const tasaVueltoEfectiva = tasaVuelto > 0 ? tasaVuelto : tasaTicket;
+            const montoVueltoUsdCalculado = metodoVueltoEsUsd && tasaVueltoEfectiva > 0
+                ? Number((tActual.vueltoBs / tasaVueltoEfectiva).toFixed(2))
+                : tActual.vueltoUsd;
+
+            if (tActual.faltanteBs > 0.009) {
+                return `
+                <div class="bg-amber-50 border-2 border-amber-500 rounded p-3 text-center mb-3">
+                    <p class="text-xs font-black uppercase text-amber-900">Monto Incompleto por Cubrir</p>
+                    <p class="font-heading font-black text-xl text-amber-700">Faltan Bs. ${fmt(tActual.faltanteBs)} · <span class="text-base text-amber-900">$ ${fmt(tActual.faltanteUsd)} (Equiv. Oficial)</span></p>
+                </div>`;
+            }
+
+            if (tActual.vueltoBs > 0.009) {
+                return `
+                <div class="border-2 border-emerald-700 bg-emerald-50/70 rounded-lg p-3 mb-3">
+                    <div class="flex flex-wrap items-center justify-between gap-1 mb-2">
+                        <div>
+                            <span class="text-[10px] font-black uppercase text-emerald-900 tracking-wide block">Excedente / Vuelto del Cliente</span>
+                            <span class="font-heading font-black text-xl text-emerald-800">Bs. ${fmt(tActual.vueltoBs)}</span>
+                        </div>
+                        <span class="text-xs font-bold text-emerald-900 font-mono">$ ${fmt(tActual.vueltoUsd)} equiv. oficial</span>
+                    </div>
+
+                    <!-- Selector: Entregar Vuelto vs Retener Vuelto -->
+                    <div class="grid grid-cols-2 gap-2 mb-2.5">
+                        <button type="button" id="btn-vuelto-pagado" class="py-1.5 px-2 rounded border-2 text-xs font-heading font-black transition-all ${estadoVuelto === 'PAGADO' ? 'bg-emerald-700 text-white border-brand-black shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}">
+                            ENTREGAR VUELTO (PAGADO)
+                        </button>
+                        <button type="button" id="btn-vuelto-retenido" class="py-1.5 px-2 rounded border-2 text-xs font-heading font-black transition-all ${estadoVuelto === 'RETENIDO' ? 'bg-emerald-700 text-white border-brand-black shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}">
+                            RETENER VUELTO (A FAVOR)
+                        </button>
+                    </div>
+
+                    ${estadoVuelto === 'PAGADO' ? `
+                    <div class="bg-white border border-emerald-600 rounded p-2.5 space-y-2">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <label class="text-[11px] font-bold text-gray-700 uppercase">Método de Egreso del Vuelto:</label>
+                            <select id="select-metodo-vuelto" class="border-2 border-brand-black rounded px-2 py-1 text-xs font-bold bg-white focus:outline-none">
+                                ${metodosDisponibles.map((m) => `
+                                    <option value="${m.nombre}" ${m.nombre === metodoVuelto ? 'selected' : ''}>
+                                        ${m.nombre} (${m.moneda === 'USD' ? '$ Dólares' : 'Bs. Bolívares'})
+                                    </option>
+                                `).join('')}
+                            </select>
+                        </div>
+                        ${metodoVueltoEsUsd ? `
+                        <div class="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-gray-100">
+                            <div>
+                                <span class="text-[10px] font-bold text-gray-500 uppercase block">Tasa Pactada Vuelto USD:</span>
+                                <div class="flex items-center gap-1.5">
+                                    <input id="input-tasa-vuelto" type="text" inputmode="decimal" value="${tasaVuelto.toFixed(2)}"
+                                        class="w-24 border-2 border-brand-black rounded px-2 py-0.5 text-xs font-mono font-bold" />
+                                    <button id="btn-reset-tasa-vuelto" type="button" class="text-[10px] bg-gray-100 border border-gray-400 rounded px-1.5 py-0.5 hover:bg-gray-200">
+                                        Reset BCV
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <span class="text-[10px] font-bold text-gray-500 uppercase block">Divisa USD a Entregar:</span>
+                                <span class="font-heading font-black text-base text-brand-purple">
+                                    $ ${fmt(montoVueltoUsdCalculado)} USD
+                                </span>
+                            </div>
+                        </div>
+                        ` : `
+                        <div class="flex items-center justify-between pt-1 border-t border-gray-100 text-xs">
+                            <span class="font-bold text-gray-600">Total a Entregar en Bolívares:</span>
+                            <span class="font-heading font-black text-base text-brand-black">Bs. ${fmt(tActual.vueltoBs)}</span>
+                        </div>
+                        `}
+                    </div>
+                    ` : `
+                    <div class="bg-white border border-gray-300 rounded p-2 text-xs text-gray-700">
+                        <p class="font-bold text-emerald-900 mb-0.5">Vuelto Retenido como Saldo a Favor</p>
+                        <p class="text-[11px] text-gray-600 leading-tight">
+                            El excedente de <b>Bs. ${fmt(tActual.vueltoBs)} ($ ${fmt(tActual.vueltoUsd)})</b> no genera egreso físico de caja y se asienta en el comprobante como saldo a favor o ganancia por excedente del negocio.
+                        </p>
+                    </div>
+                    `}
+                </div>`;
+            }
+
+            return `
+            <div class="bg-emerald-50 border-2 border-emerald-600 rounded p-2.5 text-center mb-3">
+                <p class="text-xs font-black uppercase text-emerald-800">Total Exactamente Cubierto</p>
+                <p class="text-xs text-emerald-700 font-bold">Importe liquidado sin diferencia pendiente.</p>
+            </div>`;
+        };
+
         const renderFormularioCobro = () => {
             const t = calcularTotales();
 
@@ -513,7 +614,7 @@ export class CajaView {
                     const equivOficialUsd = tasaTicket > 0 ? aporteBs / tasaTicket : 0;
 
                     return `
-                    <div class="border-2 border-brand-black rounded-lg p-3 bg-gray-50 mb-2.5">
+                    <div data-pago-card="${p.id}" class="border-2 border-brand-black rounded-lg p-3 bg-gray-50 mb-2.5">
                         <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
                             <span class="font-heading font-black text-xs uppercase text-gray-700">
                                 Pago #${idx + 1} · <span class="${p.moneda === 'USD' ? 'text-brand-purple' : 'text-brand-black'}">${p.moneda === 'USD' ? 'Divisa ($ USD)' : 'Moneda Nacional (Bs.)'}</span>
@@ -556,7 +657,7 @@ export class CajaView {
                                     class="w-full border-2 border-brand-black rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-purple" />
                             </div>
                         </div>
-                        <div class="flex flex-wrap items-center justify-between gap-1 mt-1.5 text-[11px]">
+                        <div data-aporte-info="${p.id}" class="flex flex-wrap items-center justify-between gap-1 mt-1.5 text-[11px]">
                             <span class="font-bold text-brand-purple">Aporte: Bs. ${fmt(aporteBs)}</span>
                             <span class="text-gray-500 font-mono">Equiv. oficial BCV: $ ${fmt(equivOficialUsd)} ${tasaUsd !== tasaTicket ? `(Tasa: Bs. ${fmt(tasaUsd)} vs BCV: Bs. ${fmt(tasaTicket)})` : ''}</span>
                         </div>
@@ -583,7 +684,7 @@ export class CajaView {
                                     class="w-full border-2 border-brand-black rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-purple" />
                             </div>
                         </div>
-                        <div class="flex flex-wrap items-center justify-between gap-1 mt-1.5 text-[11px]">
+                        <div data-aporte-info="${p.id}" class="flex flex-wrap items-center justify-between gap-1 mt-1.5 text-[11px]">
                             <span class="font-bold text-brand-black">Aporte directo: Bs. ${fmt(p.monto)}</span>
                             <span class="text-gray-500 font-mono">Equiv. oficial BCV: $ ${fmt(equivOficialUsd)}</span>
                         </div>
@@ -593,89 +694,7 @@ export class CajaView {
                 })
                 .join('');
 
-            const cfgMetodoVuelto = metodosDisponibles.find((m) => m.nombre === metodoVuelto);
-            const metodoVueltoEsUsd = cfgMetodoVuelto?.moneda === 'USD';
-            const tasaVueltoEfectiva = tasaVuelto > 0 ? tasaVuelto : tasaTicket;
-            const montoVueltoUsdCalculado = metodoVueltoEsUsd && tasaVueltoEfectiva > 0
-                ? Number((t.vueltoBs / tasaVueltoEfectiva).toFixed(2))
-                : t.vueltoUsd;
-
-            const estadoBalanceHtml =
-                t.faltanteBs > 0.009
-                    ? `
-                    <div class="bg-amber-50 border-2 border-amber-500 rounded p-3 text-center mb-3">
-                        <p class="text-xs font-black uppercase text-amber-900">Monto Incompleto por Cubrir</p>
-                        <p class="font-heading font-black text-xl text-amber-700">Faltan Bs. ${fmt(t.faltanteBs)} · <span class="text-base text-amber-900">$ ${fmt(t.faltanteUsd)} (Equiv. Oficial)</span></p>
-                    </div>`
-                    : t.vueltoBs > 0.009
-                    ? `
-                    <div class="border-2 border-emerald-700 bg-emerald-50/70 rounded-lg p-3 mb-3">
-                        <div class="flex flex-wrap items-center justify-between gap-1 mb-2">
-                            <div>
-                                <span class="text-[10px] font-black uppercase text-emerald-900 tracking-wide block">Excedente / Vuelto del Cliente</span>
-                                <span class="font-heading font-black text-xl text-emerald-800">Bs. ${fmt(t.vueltoBs)}</span>
-                            </div>
-                            <span class="text-xs font-bold text-emerald-900 font-mono">$ ${fmt(t.vueltoUsd)} equiv. oficial</span>
-                        </div>
-
-                        <!-- Selector: Entregar Vuelto vs Retener Vuelto -->
-                        <div class="grid grid-cols-2 gap-2 mb-2.5">
-                            <button type="button" id="btn-vuelto-pagado" class="py-1.5 px-2 rounded border-2 text-xs font-heading font-black transition-all ${estadoVuelto === 'PAGADO' ? 'bg-emerald-700 text-white border-brand-black shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}">
-                                ENTREGAR VUELTO (PAGADO)
-                            </button>
-                            <button type="button" id="btn-vuelto-retenido" class="py-1.5 px-2 rounded border-2 text-xs font-heading font-black transition-all ${estadoVuelto === 'RETENIDO' ? 'bg-emerald-700 text-white border-brand-black shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}">
-                                RETENER VUELTO (A FAVOR)
-                            </button>
-                        </div>
-
-                        ${estadoVuelto === 'PAGADO' ? `
-                        <div class="bg-white border border-emerald-600 rounded p-2.5 space-y-2">
-                            <div class="flex flex-wrap items-center justify-between gap-2">
-                                <label class="text-[11px] font-bold text-gray-700 uppercase">Método de Egreso del Vuelto:</label>
-                                <select id="select-metodo-vuelto" class="border-2 border-brand-black rounded px-2 py-1 text-xs font-bold bg-white focus:outline-none">
-                                    ${metodosDisponibles.map((m) => `
-                                        <option value="${m.nombre}" ${m.nombre === metodoVuelto ? 'selected' : ''}>
-                                            ${m.nombre} (${m.moneda === 'USD' ? '$ Dólares' : 'Bs. Bolívares'})
-                                        </option>
-                                    `).join('')}
-                                </select>
-                            </div>
-                            ${metodoVueltoEsUsd ? `
-                            <div class="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-gray-100">
-                                <div>
-                                    <span class="text-[10px] font-bold text-gray-500 uppercase block">Tasa Pactada Vuelto USD:</span>
-                                    <div class="flex items-center gap-1.5">
-                                        <input id="input-tasa-vuelto" type="text" inputmode="decimal" value="${tasaVuelto.toFixed(2)}"
-                                            class="w-24 border-2 border-brand-black rounded px-2 py-0.5 text-xs font-mono font-bold" />
-                                        <button id="btn-reset-tasa-vuelto" type="button" class="text-[10px] bg-gray-100 border border-gray-400 rounded px-1.5 py-0.5 hover:bg-gray-200">
-                                            Reset BCV
-                                        </button>
-                                    </div>
-                                </div>
-                                <div class="text-right">
-                                    <span class="text-[10px] font-bold text-gray-500 uppercase block">Divisa USD a Entregar:</span>
-                                    <span class="font-heading font-black text-base text-brand-purple">
-                                        $ ${fmt(montoVueltoUsdCalculado)} USD
-                                    </span>
-                                </div>
-                            </div>
-                            ` : `
-                            <div class="flex items-center justify-between pt-1 border-t border-gray-100 text-xs">
-                                <span class="font-bold text-gray-600">Total a Entregar en Bolívares:</span>
-                                <span class="font-heading font-black text-base text-brand-black">Bs. ${fmt(t.vueltoBs)}</span>
-                            </div>
-                            `}
-                        </div>
-                        ` : `
-                        <div class="bg-white border border-gray-300 rounded p-2 text-xs text-gray-700">
-                            <p class="font-bold text-emerald-900 mb-0.5">Vuelto Retenido como Saldo a Favor</p>
-                            <p class="text-[11px] text-gray-600 leading-tight">
-                                El excedente de <b>Bs. ${fmt(t.vueltoBs)} ($ ${fmt(t.vueltoUsd)})</b> no genera egreso físico de caja y se asienta en el comprobante como saldo a favor o ganancia por excedente del negocio.
-                            </p>
-                        </div>
-                        `}
-                    </div>`
-                    : '';
+            const estadoBalanceHtml = `<div id="contenedor-estado-balance">${generarBalanceHtml(t)}</div>`;
 
             this.modalContenido(`
                 <div>
@@ -872,6 +891,65 @@ export class CajaView {
                 });
             });
 
+            const refrescarBalanceUi = () => {
+                const t = calcularTotales();
+                const cont = this.modal.querySelector('#contenedor-estado-balance');
+                if (cont) {
+                    cont.innerHTML = generarBalanceHtml(t);
+                    // Reconectar listeners de vuelto en el nuevo HTML
+                    this.modal.querySelector('#btn-vuelto-pagado')?.addEventListener('click', () => {
+                        estadoVuelto = 'PAGADO';
+                        this.resolucionVueltoBorrador = { estado: estadoVuelto, metodo: metodoVuelto, tasa: tasaVuelto };
+                        renderFormularioCobro();
+                    });
+                    this.modal.querySelector('#btn-vuelto-retenido')?.addEventListener('click', () => {
+                        estadoVuelto = 'RETENIDO';
+                        this.resolucionVueltoBorrador = { estado: estadoVuelto, metodo: metodoVuelto, tasa: tasaVuelto };
+                        renderFormularioCobro();
+                    });
+                    this.modal.querySelector<HTMLSelectElement>('#select-metodo-vuelto')?.addEventListener('change', (e) => {
+                        metodoVuelto = (e.target as HTMLSelectElement).value;
+                        this.resolucionVueltoBorrador = { estado: estadoVuelto, metodo: metodoVuelto, tasa: tasaVuelto };
+                        renderFormularioCobro();
+                    });
+                    const inTasaV = this.modal.querySelector<HTMLInputElement>('#input-tasa-vuelto');
+                    if (inTasaV) {
+                        inTasaV.addEventListener('input', (e) => {
+                            const val = parseNum((e.target as HTMLInputElement).value);
+                            tasaVuelto = val > 0 ? val : tasaTicket;
+                            this.resolucionVueltoBorrador = { estado: estadoVuelto, metodo: metodoVuelto, tasa: tasaVuelto };
+                        });
+                        inTasaV.addEventListener('blur', () => renderFormularioCobro());
+                    }
+                    this.modal.querySelector('#btn-reset-tasa-vuelto')?.addEventListener('click', () => {
+                        tasaVuelto = tasaTicket;
+                        this.resolucionVueltoBorrador = { estado: estadoVuelto, metodo: metodoVuelto, tasa: tasaVuelto };
+                        renderFormularioCobro();
+                    });
+                }
+                const btnConf = this.modal.querySelector<HTMLButtonElement>('#btn-confirmar-cobro');
+                if (btnConf) btnConf.disabled = !t.puedeConfirmar;
+            };
+
+            const actualizarAporteTarjeta = (item: typeof lineasCobro[0]) => {
+                const infoDiv = this.modal.querySelector(`div[data-aporte-info="${item.id}"]`);
+                if (!infoDiv) return;
+                const tasaUsd = item.tasaCambio > 0 ? item.tasaCambio : tasaTicket;
+                const aporteBs = item.moneda === 'USD' ? item.monto * tasaUsd : item.monto;
+                const equivOficialUsd = tasaTicket > 0 ? aporteBs / tasaTicket : 0;
+                if (item.moneda === 'USD') {
+                    infoDiv.innerHTML = `
+                        <span class="font-bold text-brand-purple">Aporte: Bs. ${fmt(aporteBs)}</span>
+                        <span class="text-gray-500 font-mono">Equiv. oficial BCV: $ ${fmt(equivOficialUsd)} ${tasaUsd !== tasaTicket ? `(Tasa: Bs. ${fmt(tasaUsd)} vs BCV: Bs. ${fmt(tasaTicket)})` : ''}</span>
+                    `;
+                } else {
+                    infoDiv.innerHTML = `
+                        <span class="font-bold text-brand-black">Aporte directo: Bs. ${fmt(item.monto)}</span>
+                        <span class="text-gray-500 font-mono">Equiv. oficial BCV: $ ${fmt(equivOficialUsd)}</span>
+                    `;
+                }
+            };
+
             // Inputs de tasa (para métodos en USD)
             this.modal.querySelectorAll<HTMLInputElement>('input[data-pago-tasa]').forEach((inp) => {
                 inp.addEventListener('input', (e) => {
@@ -881,13 +959,17 @@ export class CajaView {
                     if (item) {
                         item.tasaCambio = val > 0 ? val : tasaTicket;
                         this.pagosBorrador = lineasCobro;
-                        const t = calcularTotales();
-                        const btnConf = this.modal.querySelector<HTMLButtonElement>('#btn-confirmar-cobro');
-                        if (btnConf) btnConf.disabled = !t.puedeConfirmar;
+                        actualizarAporteTarjeta(item);
+                        refrescarBalanceUi();
                     }
                 });
-                inp.addEventListener('blur', () => {
-                    renderFormularioCobro();
+                inp.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        const t = calcularTotales();
+                        if (t.puedeConfirmar) {
+                            this.modal.querySelector<HTMLButtonElement>('#btn-confirmar-cobro')?.click();
+                        }
+                    }
                 });
             });
 
@@ -913,15 +995,17 @@ export class CajaView {
                     if (item) {
                         item.monto = val;
                         this.pagosBorrador = lineasCobro;
-                        const t = calcularTotales();
-                        const btnConf = this.modal.querySelector<HTMLButtonElement>('#btn-confirmar-cobro');
-                        if (btnConf) {
-                            btnConf.disabled = !t.puedeConfirmar;
-                        }
+                        actualizarAporteTarjeta(item);
+                        refrescarBalanceUi();
                     }
                 });
-                inp.addEventListener('blur', () => {
-                    renderFormularioCobro();
+                inp.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        const t = calcularTotales();
+                        if (t.puedeConfirmar) {
+                            this.modal.querySelector<HTMLButtonElement>('#btn-confirmar-cobro')?.click();
+                        }
+                    }
                 });
             });
 
@@ -934,6 +1018,14 @@ export class CajaView {
                     if (item) {
                         item.referencia = val;
                         this.pagosBorrador = lineasCobro;
+                    }
+                });
+                inp.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        const t = calcularTotales();
+                        if (t.puedeConfirmar) {
+                            this.modal.querySelector<HTMLButtonElement>('#btn-confirmar-cobro')?.click();
+                        }
                     }
                 });
             });
@@ -1010,7 +1102,7 @@ export class CajaView {
                 btn.addEventListener('click', () => {
                     void (async () => {
                         const mNombre = btn.dataset.cajaEliminarMetodo || '';
-                        if (mNombre && window.confirm(`¿Seguro que deseas eliminar el método de pago "${mNombre}"?`)) {
+                        if (mNombre && await confirmarAccion(`¿Seguro que deseas eliminar el método de pago "${mNombre}"?`, 'ELIMINAR MÉTODO')) {
                             metodosDisponibles = await api.eliminarMetodoPago(mNombre);
                             // Si la línea actual tenía ese método, reasignar a uno disponible
                             lineasCobro.forEach((l) => {

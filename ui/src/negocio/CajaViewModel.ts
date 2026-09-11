@@ -191,8 +191,9 @@ export class CajaViewModel {
             limpia = Math.round(limpia * 1000) / 1000;
         }
 
-        if (prod && !prod.sinStock && limpia > Number(prod.stock)) {
-            return `Stock insuficiente para ${linea.nombre}. Disponible: ${prod.stock}`;
+        const factor = linea.modoVenta === 'paquete' && prod?.esCaja && prod?.unidadesPorCaja ? prod.unidadesPorCaja : 1;
+        if (prod && !prod.sinStock && (limpia * factor) > Number(prod.stock)) {
+            return `Stock insuficiente para ${linea.nombre}. Disponible: ${prod.stock} un., Solicitado: ${limpia * factor} un.`;
         }
 
         linea.cantidad = limpia;
@@ -219,11 +220,13 @@ export class CajaViewModel {
         }
         if (this.carrito.length === 0) throw new Error('Carrito vacio');
         
-        // Verificación previa de existencias
+        // Verificación previa de existencias multiplicando por unidades de presentación
         for (const l of this.carrito) {
             const p = this.productos.find((x) => x.sku === l.sku);
-            if (p && !p.sinStock && l.cantidad > Number(p.stock)) {
-                throw new Error(`Stock insuficiente para ${p.nombre}. Disponible: ${p.stock}, En carrito: ${l.cantidad}`);
+            const factor = l.modoVenta === 'paquete' && p?.esCaja && p?.unidadesPorCaja ? p.unidadesPorCaja : 1;
+            const unidadesRequeridas = l.cantidad * factor;
+            if (p && !p.sinStock && unidadesRequeridas > Number(p.stock)) {
+                throw new Error(`Stock insuficiente para ${p.nombre}. Disponible: ${p.stock} un., En carrito: ${unidadesRequeridas} un.`);
             }
         }
 

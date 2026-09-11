@@ -1182,6 +1182,25 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
             demoStore.persist();
             return Promise.resolve(c as unknown as T);
         }
+        case 'convertir_cuenta_a_deuda': {
+            const ventaId = String(args?.ventaId || '');
+            const cliente = String(args?.cliente || '').trim();
+            const nota = typeof args?.nota === 'string' ? args.nota.trim() : undefined;
+            const cuenta = demoStore.cuentas.find((c) => c.ventaId === ventaId);
+            if (!cuenta) {
+                return Promise.reject(new Error('Cuenta no encontrada'));
+            }
+            cuenta.tipo = 'deuda';
+            if (cliente) {
+                cuenta.cliente = cliente;
+                cuenta.etiqueta = cliente;
+            }
+            if (nota !== undefined) {
+                cuenta.nota = nota;
+            }
+            demoStore.persist();
+            return Promise.resolve(cuenta as unknown as T);
+        }
         case 'agregar_consumo': {
             const ventaId = String(args?.ventaId || '');
             const sku = String(args?.sku || '').trim().toUpperCase();
@@ -1235,17 +1254,29 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
         case 'eliminar_consumo': {
             const ventaId = String(args?.ventaId || '');
             const consumoId = String(args?.consumoId || '');
+            const cantARemover = args?.cantidad !== undefined && args?.cantidad !== null ? parseNum(args.cantidad) : 0;
             const cuenta = demoStore.cuentas.find((c) => c.ventaId === ventaId);
             if (cuenta && Array.isArray(cuenta.consumos)) {
                 const idx = cuenta.consumos.findIndex((x) => x.id === consumoId);
                 if (idx !== -1) {
                     const item = cuenta.consumos[idx];
-                    // Reintegrar stock físico al inventario si el producto no es sinStock
+                    const esPaquete = item.modoVenta === 'paquete';
                     const prod = demoStore.productos.find((p) => p.sku.trim().toUpperCase() === item.sku.trim().toUpperCase());
-                    if (prod && !prod.sinStock) {
-                        prod.stock = String(parseNum(prod.stock) + item.cantidad);
+                    const multUnidades = (esPaquete && prod?.unidadesPorCaja && prod.unidadesPorCaja > 1) ? prod.unidadesPorCaja : 1;
+
+                    if (cantARemover > 0 && cantARemover < item.cantidad) {
+                        item.cantidad -= cantARemover;
+                        item.subtotalUsd = (item.cantidad * parseNum(item.precioUsd)).toFixed(2);
+                        if (prod && !prod.sinStock) {
+                            prod.stock = String(parseNum(prod.stock) + (cantARemover * multUnidades));
+                        }
+                    } else {
+                        // Reintegrar todo
+                        if (prod && !prod.sinStock) {
+                            prod.stock = String(parseNum(prod.stock) + (item.cantidad * multUnidades));
+                        }
+                        cuenta.consumos.splice(idx, 1);
                     }
-                    cuenta.consumos.splice(idx, 1);
                     const tasa = parseNum(demoStore.tasaActual.valor) || 807.39;
                     const nuevoTotU = cuenta.consumos.reduce((acc, it) => acc + parseNum(it.subtotalUsd), 0);
                     cuenta.totalParcialUsd = nuevoTotU.toFixed(2);
@@ -1979,12 +2010,14 @@ export const api = {
     cuentas: () => invocar<CuentaAbierta[]>('listar_cuentas'),
     agregarConsumo: (ventaId: string, sku: string, cantidad: string, mayor: boolean, modo_venta?: string) =>
         invocar<CuentaAbierta>('agregar_consumo', { ventaId, sku, cantidad, clienteMayorEdad: mayor, modo_venta }),
-    eliminarConsumo: (ventaId: string, consumoId: string) =>
-        invocar<CuentaAbierta>('eliminar_consumo', { ventaId, consumoId }),
+    eliminarConsumo: (ventaId: string, consumoId: string, cantidad?: string | number) =>
+        invocar<CuentaAbierta>('eliminar_consumo', { ventaId, consumoId, cantidad: cantidad !== undefined ? String(cantidad) : undefined }),
     abonarCuenta: (ventaId: string, montoUsd: number, montoBs?: number) =>
         invocar<CuentaAbierta>('abonar_cuenta', { ventaId, montoUsd, montoBs }),
     editarAbonoCuenta: (ventaId: string, nuevoAbonoUsd: number) =>
         invocar<CuentaAbierta>('editar_abono_cuenta', { ventaId, nuevoAbonoUsd }),
+    convertirCuentaADeuda: (ventaId: string, cliente: string, nota?: string) =>
+        invocar<CuentaAbierta>('convertir_cuenta_a_deuda', { ventaId, cliente, nota }),
     cerrarCuenta: (
         ventaId: string,
         recibido: string,

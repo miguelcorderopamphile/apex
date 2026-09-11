@@ -1,4 +1,5 @@
 import { api, Categoria, CategoriaDineroBruto, JornadaLaboral, MonedaMetodo, PanelDatos, ProductoInfo, RespaldoInfo, Ticket } from './api';
+import { confirmarAccion, pedirValor } from './dialogs';
 import { NegocioModel } from './NegocioModel';
 
 export const parseNum = (n: unknown): number => {
@@ -865,7 +866,7 @@ export class PanelDuenoView {
                 });
                 boxAcciones.querySelector('#btn-cerrar-jornada')?.addEventListener('click', async () => {
                     try {
-                        const confirmacion = window.confirm('¿Confirmas el cierre de la jornada operativa actual? Se generará el balance consolidado del turno.');
+                        const confirmacion = await confirmarAccion('¿Confirmas el cierre de la jornada operativa actual? Se generará el balance consolidado del turno.', 'CIERRE DE JORNADA');
                         if (confirmacion) {
                             const cerrada = await api.cerrarJornada();
                             this.mostrarToast(`Jornada cerrada. ID: ${cerrada.id} — $${cerrada.ventasTotalUsd} USD (Bs. ${cerrada.ventasTotalBs})`, 'success');
@@ -894,7 +895,7 @@ export class PanelDuenoView {
                     btn.addEventListener('click', async () => {
                         const id = btn.dataset.opEdit || '';
                         const actual = btn.dataset.opNom || '';
-                        const nuevo = prompt('Editar nombre del operador:', actual);
+                        const nuevo = await pedirValor('Editar nombre del operador:', actual, 'EDITAR OPERADOR');
                         if (nuevo && nuevo.trim() && nuevo.trim() !== actual) {
                             await api.editarOperador(id, nuevo.trim());
                             void refrescarModuloJornada();
@@ -906,7 +907,7 @@ export class PanelDuenoView {
                     btn.addEventListener('click', async () => {
                         const id = btn.dataset.opDel || '';
                         const nom = btn.dataset.opNom || '';
-                        const confirma = confirm(`¿Eliminar al operador "${nom}"?`);
+                        const confirma = await confirmarAccion(`¿Eliminar al operador "${nom}"?`, 'ELIMINAR OPERADOR');
                         if (confirma) {
                             await api.eliminarOperador(id);
                             void refrescarModuloJornada();
@@ -930,7 +931,7 @@ export class PanelDuenoView {
                 metodosBox.querySelectorAll<HTMLButtonElement>('button[data-metodo-del]').forEach(btn => {
                     btn.addEventListener('click', async () => {
                         const nombre = btn.dataset.metodoDel || '';
-                        const confirma = window.confirm(`¿Confirmas eliminar el método de pago "${nombre}"?`);
+                        const confirma = await confirmarAccion(`¿Confirmas eliminar el método de pago "${nombre}"?`, 'ELIMINAR MÉTODO');
                         if (confirma) {
                             await api.eliminarMetodoPago(nombre);
                             void refrescarModuloJornada();

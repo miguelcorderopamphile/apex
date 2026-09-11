@@ -1,4 +1,7 @@
 import { api, CuentaAbierta, MetodoPagoConfig, MonedaMetodo, PagoTicket, ProductoInfo, ResolucionVuelto } from "./api";
+import { confirmarAccion, pedirValor } from "./dialogs";
+import { calcularAntiguedadVet } from "./dateUtils";
+import { abrirModalHistorialTurno } from "./historialTurno";
 import { NegocioModel } from "./NegocioModel";
 
 const parseNum = (n: unknown): number => {
@@ -76,15 +79,7 @@ const sanitizarInputTexto = (
 };
 
 function calcularAntiguedad(fechaUnix?: number): string {
-    if (!fechaUnix) return "Hoy";
-    const ahora = Math.floor(Date.now() / 1000);
-    const diff = Math.max(0, ahora - fechaUnix);
-    if (diff < 3600) return "Hoy (reciente)";
-    const horas = Math.floor(diff / 3600);
-    if (horas < 24) return `Hoy (hace ${horas}h)`;
-    const dias = Math.floor(horas / 24);
-    if (dias === 1) return "Hace 1 día";
-    return `Hace ${dias} días`;
+    return calcularAntiguedadVet(fechaUnix);
 }
 
 export class CuentasView {
@@ -174,6 +169,9 @@ export class CuentasView {
                 <p class="text-brand-text font-body text-xs sm:text-sm">${esLicoreria ? 'Control de comandas activas en local y deudas comerciales a crédito con liquidación a tasa libre' : 'Gestión de crédito comercial a clientes de confianza con liquidación a tasa libre'}</p>
             </div>
             <div class="flex items-center gap-2">
+                <button id="btn-historial-turno-cuentas" class="bg-gray-100 hover:bg-gray-200 text-brand-black px-3 sm:px-4 py-2 sm:py-2.5 rounded font-heading font-black text-xs sm:text-sm border-2 border-brand-black shadow-brutal hover:-translate-y-0.5 transition-all flex items-center gap-1.5">
+                    <span>HISTORIAL DEL TURNO</span>
+                </button>
                 <button id="btn-nueva-deuda" class="bg-amber-400 hover:bg-amber-500 text-brand-black px-3 sm:px-4 py-2 sm:py-2.5 rounded font-heading font-black text-xs sm:text-sm border-2 border-brand-black shadow-brutal hover:-translate-y-0.5 transition-all flex items-center gap-1.5">
                     <span class="text-base sm:text-lg leading-none">+</span>
                     <span>REGISTRAR DEUDA</span>
@@ -425,15 +423,23 @@ export class CuentasView {
                                 : this.cuentaSeleccionada.consumos.map((item) => `
                                 <div class="flex items-center justify-between border-2 border-brand-black rounded-lg bg-white px-3 py-2 text-xs font-bold shadow-brutal-sm hover:bg-amber-50/50 transition-colors gap-2">
                                     <div class="flex-1 min-w-0 pr-2">
-                                        <p class="truncate text-brand-black font-heading font-black text-sm" title="${item.nombre}">${item.nombre}</p>
+                                        <p class="truncate text-brand-black font-heading font-black text-sm" title="${item.nombre}">
+                                            ${item.nombre}
+                                            ${item.modoVenta === 'paquete' ? '<span class="inline-block ml-1 text-[9px] font-black bg-purple-100 text-purple-800 border border-brand-purple rounded px-1">paquete</span>' : ''}
+                                        </p>
                                         <p class="text-[11px] text-gray-500 font-semibold">${item.cantidad} un. &times; $${fmt(item.precioUsd)} <span class="text-gray-400 font-normal">· Bs. ${this.modelo.bs(parseNum(item.precioUsd))} c/u</span></p>
                                     </div>
-                                    <div class="flex items-center gap-3 shrink-0">
-                                        <div class="text-right">
+                                    <div class="flex items-center gap-2 shrink-0">
+                                        <div class="text-right mr-1">
                                             <p class="font-heading font-black text-sm sm:text-base text-brand-black leading-tight">$${fmt(item.subtotalUsd)}</p>
                                             <p class="text-[10px] font-bold text-gray-500 leading-tight">Bs. ${this.modelo.bs(parseNum(item.subtotalUsd))}</p>
                                         </div>
-                                        <button data-del-consumo="${item.id}" title="Eliminar consumo y reintegrar stock al inventario" class="w-7 h-7 flex items-center justify-center rounded border-2 border-brand-black bg-red-100 hover:bg-red-500 hover:text-white text-red-800 text-sm font-black transition-colors active:scale-95">&times;</button>
+                                        <div class="flex items-center gap-1 border-2 border-brand-black rounded bg-gray-100 p-0.5">
+                                            <button data-dec-consumo="${item.id}" data-sku="${item.sku}" data-cant="${item.cantidad}" data-modo="${item.modoVenta || 'unidad'}" title="Disminuir 1 unidad" class="w-6 h-6 flex items-center justify-center rounded border border-brand-black bg-white hover:bg-amber-200 text-brand-black font-black text-xs active:scale-95">-</button>
+                                            <span class="w-6 text-center font-black text-xs font-mono">${item.cantidad}</span>
+                                            <button data-inc-consumo="${item.id}" data-sku="${item.sku}" data-modo="${item.modoVenta || 'unidad'}" title="Aumentar 1 unidad" class="w-6 h-6 flex items-center justify-center rounded border border-brand-black bg-white hover:bg-emerald-200 text-brand-black font-black text-xs active:scale-95">+</button>
+                                        </div>
+                                        <button data-del-consumo="${item.id}" title="Eliminar todo el consumo y reintegrar stock al inventario" class="w-7 h-7 flex items-center justify-center rounded border-2 border-brand-black bg-red-100 hover:bg-red-500 hover:text-white text-red-800 text-sm font-black transition-colors active:scale-95">&times;</button>
                                     </div>
                                 </div>
                             `).join("")}
@@ -475,15 +481,20 @@ export class CuentasView {
                         </div>
                     </div>
 
-                    <!-- Botonera de Abono, Corrección y Liquidación -->
-                    <div class="border-t-2 border-brand-black pt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <button id="btn-abonar-cuenta" class="bg-amber-400 hover:bg-amber-500 text-brand-black font-heading font-black text-xs sm:text-sm py-3.5 rounded border-2 border-brand-black shadow-brutal active:translate-y-0.5">
+                    <!-- Botonera de Abono, Corrección, Conversión y Liquidación -->
+                    <div class="border-t-2 border-brand-black pt-4 grid grid-cols-1 sm:grid-cols-${!esDeuda ? '4' : '3'} gap-2 sm:gap-3">
+                        ${!esDeuda ? `
+                        <button id="btn-convertir-deuda" class="bg-amber-200 hover:bg-amber-300 text-amber-950 font-heading font-black text-xs py-3.5 rounded border-2 border-brand-black shadow-brutal active:translate-y-0.5">
+                            CONVERTIR A DEUDA
+                        </button>
+                        ` : ''}
+                        <button id="btn-abonar-cuenta" class="bg-amber-400 hover:bg-amber-500 text-brand-black font-heading font-black text-xs py-3.5 rounded border-2 border-brand-black shadow-brutal active:translate-y-0.5">
                             + REGISTRAR ABONO
                         </button>
-                        <button id="btn-editar-abono-cuenta" class="bg-amber-100 hover:bg-amber-200 text-amber-950 font-heading font-black text-xs sm:text-sm py-3.5 rounded border-2 border-brand-black shadow-brutal active:translate-y-0.5">
+                        <button id="btn-editar-abono-cuenta" class="bg-amber-100 hover:bg-amber-200 text-amber-950 font-heading font-black text-xs py-3.5 rounded border-2 border-brand-black shadow-brutal active:translate-y-0.5">
                             EDITAR ABONO
                         </button>
-                        <button id="btn-cerrar-cuenta" class="${favorU > 0 ? "bg-emerald-600 hover:bg-emerald-700" : "bg-green-700 hover:bg-green-800"} text-white font-heading font-black text-xs sm:text-sm py-3.5 rounded border-2 border-brand-black shadow-brutal active:translate-y-0.5">
+                        <button id="btn-cerrar-cuenta" class="${favorU > 0 ? "bg-emerald-600 hover:bg-emerald-700" : "bg-green-700 hover:bg-green-800"} text-white font-heading font-black text-xs py-3.5 rounded border-2 border-brand-black shadow-brutal active:translate-y-0.5">
                             ${esDeuda
                                 ? "COBRAR Y LIQUIDAR DEUDA (TASA LIBRE)"
                                 : (favorU > 0 ? `LIQUIDAR (+$${fmt(favorU)})` : "LIQUIDAR Y COBRAR")}
@@ -503,6 +514,9 @@ export class CuentasView {
     }
 
     private vincularEventos(): void {
+        document.getElementById("btn-historial-turno-cuentas")?.addEventListener("click", () => {
+            void abrirModalHistorialTurno(this.modal);
+        });
         document.getElementById("btn-nueva-cuenta")?.addEventListener("click", () => this.modalNuevaCuenta("activa"));
         document.getElementById("btn-nueva-deuda")?.addEventListener("click", () => this.modalNuevaCuenta("deuda"));
 
@@ -541,10 +555,54 @@ export class CuentasView {
             });
         });
 
+        this.contenedor.querySelectorAll("[data-inc-consumo]").forEach((btn) => {
+            btn.addEventListener("click", async () => {
+                if (!this.cuentaSeleccionada) return;
+                const el = btn as HTMLElement;
+                const sku = el.dataset.sku || "";
+                const modo = (el.dataset.modo || 'unidad') as 'unidad' | 'paquete';
+                try {
+                    const actualizada = await api.agregarConsumo(
+                        this.cuentaSeleccionada.ventaId,
+                        sku,
+                        "1",
+                        true,
+                        modo,
+                    );
+                    this.cuentaSeleccionada = actualizada;
+                    void this.render();
+                } catch (e) {
+                    this.mostrarToast(e instanceof Error ? e.message : String(e), 'error');
+                }
+            });
+        });
+
+        this.contenedor.querySelectorAll("[data-dec-consumo]").forEach((btn) => {
+            btn.addEventListener("click", async () => {
+                if (!this.cuentaSeleccionada) return;
+                const el = btn as HTMLElement;
+                const cid = el.dataset.decConsumo || "";
+                const cant = Number(el.dataset.cant || "1");
+                if (cant <= 1) {
+                    const conf = await confirmarAccion("¿Deseas quitar este producto de la cuenta y devolverlo al inventario?", "ELIMINAR CONSUMO");
+                    if (!conf) return;
+                }
+                try {
+                    const actualizada = await api.eliminarConsumo(this.cuentaSeleccionada.ventaId, cid, 1);
+                    this.cuentaSeleccionada = actualizada;
+                    void this.render();
+                } catch (e) {
+                    this.mostrarToast(e instanceof Error ? e.message : String(e), 'error');
+                }
+            });
+        });
+
         this.contenedor.querySelectorAll("[data-del-consumo]").forEach((btn) => {
             btn.addEventListener("click", async () => {
                 if (!this.cuentaSeleccionada) return;
                 const cid = (btn as HTMLElement).dataset.delConsumo || "";
+                const conf = await confirmarAccion("¿Deseas eliminar todo este consumo y reintegrar las unidades al inventario?", "ELIMINAR CONSUMO");
+                if (!conf) return;
                 try {
                     const actualizada = await api.eliminarConsumo(this.cuentaSeleccionada.ventaId, cid);
                     this.cuentaSeleccionada = actualizada;
@@ -553,6 +611,39 @@ export class CuentasView {
                     this.mostrarToast(e instanceof Error ? e.message : String(e), 'error');
                 }
             });
+        });
+
+        document.getElementById("btn-convertir-deuda")?.addEventListener("click", async () => {
+            if (!this.cuentaSeleccionada) return;
+            const c = this.cuentaSeleccionada;
+            const clienteActual = c.cliente || c.etiqueta || "";
+            const clienteNombre = await pedirValor(
+                "Nombre o titular responsable de la deuda comercial:",
+                clienteActual,
+                "CONVERTIR A DEUDA COMERCIAL"
+            );
+            if (!clienteNombre || !clienteNombre.trim()) return;
+
+            const notaActual = c.nota || "";
+            const notaDeuda = await pedirValor(
+                "Nota o plazo de compromiso de pago (opcional):",
+                notaActual,
+                "PLAZO / COMPROMISO"
+            );
+
+            try {
+                const actualizada = await api.convertirCuentaADeuda(
+                    c.ventaId,
+                    clienteNombre.trim(),
+                    notaDeuda ? notaDeuda.trim() : undefined
+                );
+                this.cuentaSeleccionada = actualizada;
+                this.filtroTab = "deuda";
+                this.mostrarToast("Cuenta convertida a deuda comercial correctamente.", 'success');
+                void this.render();
+            } catch (e) {
+                this.mostrarToast(e instanceof Error ? e.message : String(e), 'error');
+            }
         });
 
         const inputBuscar = this.contenedor.querySelector<HTMLInputElement>("#cta-buscar-prod");
@@ -1191,10 +1282,10 @@ export class CuentasView {
         if (inBs) sanitizarInputDecimal(inBs, 50000000, 11, updatePreview);
         updatePreview();
 
-        this.modal.querySelector("#btn-preset-cero")?.addEventListener("click", () => {
+        this.modal.querySelector("#btn-preset-cero")?.addEventListener("click", async () => {
             const actVal = modo === "usd" ? parseNum(inUsd?.value) : parseNum(inBs?.value);
             if (prevAboU > 0 || actVal > 0) {
-                const confirmar = window.confirm("¿Desea restablecer el saldo abonado a $0.00? Esta acción dejará los pagos registrados en cero.");
+                const confirmar = await confirmarAccion("¿Desea restablecer el saldo abonado a $0.00? Esta acción dejará los pagos registrados en cero.", "RESTABLECER ABONO");
                 if (!confirmar) return;
             }
             if (inUsd) inUsd.value = "0.00";
@@ -1248,7 +1339,7 @@ export class CuentasView {
                 const msg = nuevoAboU === 0
                     ? `¿Confirmas reiniciar el saldo abonado a $0.00? (Monto previo registrado: $${fmt(prevAboU)})`
                     : `¿Confirmas modificar el saldo abonado de esta cuenta a $${fmt(nuevoAboU)} USD (Bs. ${fmt(nuevoAboU * tasa)})? (Monto previo registrado: $${fmt(prevAboU)})`;
-                const confirmado = window.confirm(msg);
+                const confirmado = await confirmarAccion(msg, "MODIFICAR ABONO");
                 if (!confirmado) return;
             }
 
@@ -1447,6 +1538,98 @@ export class CuentasView {
             };
         };
 
+        const generarBalanceCuentaHtml = (tActual: ReturnType<typeof calcularTotales>) => {
+            const cfgMetodoVuelto = metodosDisponibles.find((m) => m.nombre === metodoVuelto);
+            const metodoVueltoEsUsd = cfgMetodoVuelto?.moneda === 'USD';
+            const tasaVueltoEfectiva = tasaVuelto > 0 ? tasaVuelto : tasaCobro;
+            const montoVueltoUsdCalculado = metodoVueltoEsUsd && tasaVueltoEfectiva > 0
+                ? Number((tActual.vueltoBs / tasaVueltoEfectiva).toFixed(2))
+                : tActual.vueltoUsd;
+
+            if (tActual.faltanteBs > 0.009) {
+                return `
+                <div class="bg-amber-50 border-2 border-amber-500 rounded p-2.5 text-center mb-3">
+                    <p class="text-xs font-black uppercase text-amber-900">Monto Incompleto por Cubrir</p>
+                    <p class="font-heading font-black text-lg text-amber-700">Faltan Bs. ${fmt(tActual.faltanteBs)} · <span class="text-sm text-amber-900">$ ${fmt(tActual.faltanteUsd)} (Equiv. Base)</span></p>
+                </div>`;
+            }
+
+            if (tActual.vueltoBs > 0.009) {
+                return `
+                <div class="border-2 border-emerald-700 bg-emerald-50/70 rounded-lg p-3 mb-3">
+                    <div class="flex flex-wrap items-center justify-between gap-1 mb-2">
+                        <div>
+                            <span class="text-[10px] font-black uppercase text-emerald-900 tracking-wide block">Excedente / Vuelto a Devolver</span>
+                            <span class="font-heading font-black text-lg text-emerald-800">Bs. ${fmt(tActual.vueltoBs)}</span>
+                        </div>
+                        <span class="text-xs font-bold text-emerald-900 font-mono">$ ${fmt(tActual.vueltoUsd)} equiv. oficial</span>
+                    </div>
+
+                    <!-- Selector: Entregar Vuelto vs Retener Vuelto -->
+                    <div class="grid grid-cols-2 gap-2 mb-2.5">
+                        <button type="button" id="btn-vuelto-pagado-cuenta" class="py-1.5 px-2 rounded border-2 text-xs font-heading font-black transition-all ${estadoVuelto === 'PAGADO' ? 'bg-emerald-700 text-white border-brand-black shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}">
+                            ENTREGAR VUELTO (PAGADO)
+                        </button>
+                        <button type="button" id="btn-vuelto-retenido-cuenta" class="py-1.5 px-2 rounded border-2 text-xs font-heading font-black transition-all ${estadoVuelto === 'RETENIDO' ? 'bg-emerald-700 text-white border-brand-black shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}">
+                            RETENER VUELTO (A FAVOR)
+                        </button>
+                    </div>
+
+                    ${estadoVuelto === 'PAGADO' ? `
+                    <div class="bg-white border border-emerald-600 rounded p-2.5 space-y-2">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <label class="text-[11px] font-bold text-gray-700 uppercase">Método de Egreso del Vuelto:</label>
+                            <select id="select-metodo-vuelto-cuenta" class="border-2 border-brand-black rounded px-2 py-1 text-xs font-bold bg-white focus:outline-none">
+                                ${metodosDisponibles.map((m) => `
+                                    <option value="${m.nombre}" ${m.nombre === metodoVuelto ? 'selected' : ''}>
+                                        ${m.nombre} (${m.moneda === 'USD' ? '$ Dólares' : 'Bs. Bolívares'})
+                                    </option>
+                                `).join('')}
+                            </select>
+                        </div>
+                        ${metodoVueltoEsUsd ? `
+                        <div class="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-gray-100">
+                            <div>
+                                <span class="text-[10px] font-bold text-gray-500 uppercase block">Tasa Pactada Vuelto USD:</span>
+                                <div class="flex items-center gap-1.5">
+                                    <input id="input-tasa-vuelto-cuenta" type="text" inputmode="decimal" value="${tasaVuelto.toFixed(2)}"
+                                        class="w-24 border-2 border-brand-black rounded px-2 py-0.5 text-xs font-mono font-bold" />
+                                    <button id="btn-reset-tasa-vuelto-cuenta" type="button" class="text-[10px] bg-gray-100 border border-gray-400 rounded px-1.5 py-0.5 hover:bg-gray-200">
+                                        Reset Oficial
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <span class="text-[10px] font-bold text-gray-500 uppercase block">Divisa USD a Entregar:</span>
+                                <span class="font-heading font-black text-base text-brand-purple">
+                                    $ ${fmt(montoVueltoUsdCalculado)} USD
+                                </span>
+                            </div>
+                        </div>
+                        ` : `
+                        <div class="flex items-center justify-between pt-1 border-t border-gray-100 text-xs">
+                            <span class="font-bold text-gray-600">Total a Entregar en Bolívares:</span>
+                            <span class="font-heading font-black text-base text-brand-black">Bs. ${fmt(tActual.vueltoBs)}</span>
+                        </div>
+                        `}
+                    </div>
+                    ` : `
+                    <div class="bg-white border border-gray-300 rounded p-2 text-xs text-gray-700">
+                        <p class="font-bold text-emerald-900 mb-0.5">Vuelto Retenido como Saldo a Favor</p>
+                        <p class="text-[11px] text-gray-600 leading-tight">
+                            El excedente de <b>Bs. ${fmt(tActual.vueltoBs)} ($ ${fmt(tActual.vueltoUsd)})</b> no genera egreso físico de caja y se asienta en el comprobante como saldo a favor retenido en el negocio.
+                        </p>
+                    </div>
+                    `}
+                </div>`;
+            }
+            return `
+            <div class="bg-emerald-50 border-2 border-emerald-600 rounded p-2.5 text-center mb-3">
+                <p class="text-xs font-black uppercase text-emerald-800">Total Exactamente Cubierto</p>
+                <p class="text-xs text-emerald-700 font-bold">Importe liquidado sin diferencia pendiente.</p>
+            </div>`;
+        };
+
         const renderModalLiquidacion = () => {
             const t = calcularTotales();
 
@@ -1482,14 +1665,14 @@ export class CuentasView {
                     const equivOficialUsd = tasaCobro > 0 ? aporteBs / tasaCobro : 0;
 
                     return `
-                    <div class="border-2 border-brand-black rounded-lg p-2.5 bg-gray-50 mb-2">
-                        <div class="flex flex-wrap items-center justify-between gap-1 mb-1.5">
+                    <div data-pago-card="${p.id}" class="border-2 border-brand-black rounded-lg p-3 bg-gray-50 mb-2.5">
+                        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
                             <span class="font-heading font-black text-xs uppercase text-gray-700">
                                 Pago #${idx + 1} · <span class="${p.moneda === 'USD' ? 'text-brand-purple' : 'text-brand-black'}">${p.moneda === 'USD' ? 'Divisa ($ USD)' : 'Moneda Nacional (Bs.)'}</span>
                             </span>
                             ${
                                 lineasCobro.length > 1
-                                    ? `<button data-eliminar-pago="${p.id}" class="text-[11px] font-black text-red-600 hover:text-red-800 bg-red-50 border border-red-300 rounded px-2 py-0.5">Eliminar</button>`
+                                    ? `<button data-eliminar-pago="${p.id}" class="text-xs font-black text-red-600 hover:text-red-800 bg-red-50 border border-red-300 rounded px-2 py-0.5">Eliminar</button>`
                                     : ''
                             }
                         </div>
@@ -1499,33 +1682,33 @@ export class CuentasView {
                         <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
                             <div class="sm:col-span-4">
                                 <label class="block text-[10px] font-bold text-gray-500 uppercase mb-0.5">Medio en Divisa</label>
-                                <select data-pago-metodo="${p.id}" class="w-full border-2 border-brand-black rounded px-2 py-1 font-heading font-black text-xs bg-white focus:outline-none">
+                                <select data-pago-metodo="${p.id}" class="w-full border-2 border-brand-black rounded px-2.5 py-1.5 font-heading font-black text-xs bg-white focus:outline-none focus:ring-2 focus:ring-brand-purple">
                                     ${opcionesMetodos}
                                 </select>
                             </div>
                             <div class="sm:col-span-3">
                                 <label class="block text-[10px] font-bold text-gray-500 uppercase mb-0.5">Monto ($ USD)</label>
                                 <div class="flex items-center">
-                                    <span class="bg-brand-black text-white px-2 py-1 rounded-l border-y-2 border-l-2 border-brand-black text-xs font-mono font-bold">$</span>
+                                    <span class="bg-brand-black text-white px-2 py-1.5 rounded-l border-y-2 border-l-2 border-brand-black text-xs font-mono font-bold">$</span>
                                     <input type="number" step="0.01" min="0.01" max="999999" data-pago-monto="${p.id}" value="${p.monto > 0 ? p.monto : ''}" placeholder="0.00"
-                                        class="w-full border-2 border-brand-black rounded-r px-2 py-1 text-xs font-mono font-black focus:outline-none text-right" />
+                                        class="w-full border-2 border-brand-black rounded-r px-2 py-1.5 text-xs font-mono font-black focus:outline-none focus:ring-2 focus:ring-brand-purple text-right" />
                                 </div>
                             </div>
                             <div class="sm:col-span-3">
                                 <div class="flex items-center justify-between mb-0.5">
                                     <label class="block text-[10px] font-bold text-gray-500 uppercase">Tasa (Bs./$)</label>
-                                    <button type="button" data-reset-tasa-cuenta="${p.id}" class="text-[9px] font-black uppercase text-brand-purple hover:underline" title="Restablecer a tasa oficial">Base: ${fmt(tasaCobro)}</button>
+                                    <button type="button" data-reset-tasa="${p.id}" class="text-[9px] font-black uppercase text-brand-purple hover:underline" title="Restablecer a tasa oficial">Tasa: ${fmt(tasaCobro)}</button>
                                 </div>
                                 <input type="number" step="0.01" min="1" max="100000" data-pago-tasa="${p.id}" value="${tasaUsd > 0 ? tasaUsd : tasaCobro}"
-                                    class="w-full border-2 border-brand-black rounded px-2 py-1 text-xs font-mono font-black focus:outline-none text-right" />
+                                    class="w-full border-2 border-brand-black rounded px-2 py-1.5 text-xs font-mono font-black focus:outline-none focus:ring-2 focus:ring-brand-purple text-right" />
                             </div>
                             <div class="sm:col-span-2">
                                 <label class="block text-[10px] font-bold text-gray-500 uppercase mb-0.5">Referencia</label>
                                 <input type="text" maxlength="25" data-pago-ref="${p.id}" value="${p.referencia || ''}" placeholder="Opcional"
-                                    class="w-full border-2 border-brand-black rounded px-2 py-1 text-xs font-mono focus:outline-none" />
+                                    class="w-full border-2 border-brand-black rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-purple" />
                             </div>
                         </div>
-                        <div class="flex flex-wrap items-center justify-between gap-1 mt-1 text-[11px]">
+                        <div data-aporte-info="${p.id}" class="flex flex-wrap items-center justify-between gap-1 mt-1.5 text-[11px]">
                             <span class="font-bold text-brand-purple">Aporte: Bs. ${fmt(aporteBs)}</span>
                             <span class="text-gray-500 font-mono">Equiv. base: $ ${fmt(equivOficialUsd)} ${tasaUsd !== tasaCobro ? `(Tasa: Bs. ${fmt(tasaUsd)} vs Base: Bs. ${fmt(tasaCobro)})` : ''}</span>
                         </div>
@@ -1534,25 +1717,25 @@ export class CuentasView {
                         <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
                             <div class="sm:col-span-5">
                                 <label class="block text-[10px] font-bold text-gray-500 uppercase mb-0.5">Medio en Bolívares</label>
-                                <select data-pago-metodo="${p.id}" class="w-full border-2 border-brand-black rounded px-2 py-1 font-heading font-black text-xs bg-white focus:outline-none">
+                                <select data-pago-metodo="${p.id}" class="w-full border-2 border-brand-black rounded px-2.5 py-1.5 font-heading font-black text-xs bg-white focus:outline-none focus:ring-2 focus:ring-brand-purple">
                                     ${opcionesMetodos}
                                 </select>
                             </div>
                             <div class="sm:col-span-4">
                                 <label class="block text-[10px] font-bold text-gray-500 uppercase mb-0.5">Monto (Bs.)</label>
                                 <div class="flex items-center">
-                                    <span class="bg-brand-black text-white px-2 py-1 rounded-l border-y-2 border-l-2 border-brand-black text-xs font-mono font-bold">Bs.</span>
+                                    <span class="bg-brand-black text-white px-2 py-1.5 rounded-l border-y-2 border-l-2 border-brand-black text-xs font-mono font-bold">Bs.</span>
                                     <input type="number" step="0.01" min="0.01" max="999999999" data-pago-monto="${p.id}" value="${p.monto > 0 ? p.monto : ''}" placeholder="0.00"
-                                        class="w-full border-2 border-brand-black rounded-r px-2 py-1 text-xs font-mono font-black focus:outline-none text-right" />
+                                        class="w-full border-2 border-brand-black rounded-r px-2 py-1.5 text-xs font-mono font-black focus:outline-none focus:ring-2 focus:ring-brand-purple text-right" />
                                 </div>
                             </div>
                             <div class="sm:col-span-3">
                                 <label class="block text-[10px] font-bold text-gray-500 uppercase mb-0.5">Referencia</label>
                                 <input type="text" maxlength="25" data-pago-ref="${p.id}" value="${p.referencia || ''}" placeholder="Opcional"
-                                    class="w-full border-2 border-brand-black rounded px-2 py-1 text-xs font-mono focus:outline-none" />
+                                    class="w-full border-2 border-brand-black rounded px-2.5 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-purple" />
                             </div>
                         </div>
-                        <div class="flex flex-wrap items-center justify-between gap-1 mt-1 text-[11px]">
+                        <div data-aporte-info="${p.id}" class="flex flex-wrap items-center justify-between gap-1 mt-1.5 text-[11px]">
                             <span class="font-bold text-brand-black">Aporte directo: Bs. ${fmt(p.monto)}</span>
                             <span class="text-gray-500 font-mono">Equiv. base: $ ${fmt(equivOficialUsd)}</span>
                         </div>
@@ -1562,89 +1745,7 @@ export class CuentasView {
                 })
                 .join('');
 
-            const cfgMetodoVuelto = metodosDisponibles.find((m) => m.nombre === metodoVuelto);
-            const metodoVueltoEsUsd = cfgMetodoVuelto?.moneda === 'USD';
-            const tasaVueltoEfectiva = tasaVuelto > 0 ? tasaVuelto : tasaCobro;
-            const montoVueltoUsdCalculado = metodoVueltoEsUsd && tasaVueltoEfectiva > 0
-                ? Number((t.vueltoBs / tasaVueltoEfectiva).toFixed(2))
-                : t.vueltoUsd;
-
-            const estadoBalanceHtml =
-                t.faltanteBs > 0.009
-                    ? `
-                    <div class="bg-amber-50 border-2 border-amber-500 rounded p-2.5 text-center mb-3">
-                        <p class="text-xs font-black uppercase text-amber-900">Monto Incompleto por Cubrir</p>
-                        <p class="font-heading font-black text-lg text-amber-700">Faltan Bs. ${fmt(t.faltanteBs)} · <span class="text-sm text-amber-900">$ ${fmt(t.faltanteUsd)} (Equiv. Base)</span></p>
-                    </div>`
-                    : t.vueltoBs > 0.009
-                    ? `
-                    <div class="border-2 border-emerald-700 bg-emerald-50/70 rounded-lg p-3 mb-3">
-                        <div class="flex flex-wrap items-center justify-between gap-1 mb-2">
-                            <div>
-                                <span class="text-[10px] font-black uppercase text-emerald-900 tracking-wide block">Excedente / Vuelto del Cliente</span>
-                                <span class="font-heading font-black text-lg text-emerald-800">Bs. ${fmt(t.vueltoBs)}</span>
-                            </div>
-                            <span class="text-xs font-bold text-emerald-900 font-mono">$ ${fmt(t.vueltoUsd)} equiv.</span>
-                        </div>
-
-                        <!-- Selector: Entregar Vuelto vs Retener Vuelto -->
-                        <div class="grid grid-cols-2 gap-2 mb-2.5">
-                            <button type="button" id="btn-vuelto-pagado-cuenta" class="py-1.5 px-2 rounded border-2 text-xs font-heading font-black transition-all ${estadoVuelto === 'PAGADO' ? 'bg-emerald-700 text-white border-brand-black shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}">
-                                ENTREGAR VUELTO (PAGADO)
-                            </button>
-                            <button type="button" id="btn-vuelto-retenido-cuenta" class="py-1.5 px-2 rounded border-2 text-xs font-heading font-black transition-all ${estadoVuelto === 'RETENIDO' ? 'bg-emerald-700 text-white border-brand-black shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}">
-                                RETENER VUELTO (A FAVOR)
-                            </button>
-                        </div>
-
-                        ${estadoVuelto === 'PAGADO' ? `
-                        <div class="bg-white border border-emerald-600 rounded p-2.5 space-y-2">
-                            <div class="flex flex-wrap items-center justify-between gap-2">
-                                <label class="text-[11px] font-bold text-gray-700 uppercase">Método de Egreso del Vuelto:</label>
-                                <select id="select-metodo-vuelto-cuenta" class="border-2 border-brand-black rounded px-2 py-1 text-xs font-bold bg-white focus:outline-none">
-                                    ${metodosDisponibles.map((m) => `
-                                        <option value="${m.nombre}" ${m.nombre === metodoVuelto ? 'selected' : ''}>
-                                            ${m.nombre} (${m.moneda === 'USD' ? '$ Dólares' : 'Bs. Bolívares'})
-                                        </option>
-                                    `).join('')}
-                                </select>
-                            </div>
-                            ${metodoVueltoEsUsd ? `
-                            <div class="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-gray-100">
-                                <div>
-                                    <span class="text-[10px] font-bold text-gray-500 uppercase block">Tasa Pactada Vuelto USD:</span>
-                                    <div class="flex items-center gap-1.5">
-                                        <input id="input-tasa-vuelto-cuenta" type="text" inputmode="decimal" value="${tasaVuelto.toFixed(2)}"
-                                            class="w-24 border-2 border-brand-black rounded px-2 py-0.5 text-xs font-mono font-bold" />
-                                        <button id="btn-reset-tasa-vuelto-cuenta" type="button" class="text-[10px] bg-gray-100 border border-gray-400 rounded px-1.5 py-0.5 hover:bg-gray-200">
-                                            Reset Base
-                                        </button>
-                                    </div>
-                                </div>
-                                <div class="text-right">
-                                    <span class="text-[10px] font-bold text-gray-500 uppercase block">Divisa USD a Entregar:</span>
-                                    <span class="font-heading font-black text-base text-brand-purple">
-                                        $ ${fmt(montoVueltoUsdCalculado)} USD
-                                    </span>
-                                </div>
-                            </div>
-                            ` : `
-                            <div class="flex items-center justify-between pt-1 border-t border-gray-100 text-xs">
-                                <span class="font-bold text-gray-600">Total a Entregar en Bolívares:</span>
-                                <span class="font-heading font-black text-base text-brand-black">Bs. ${fmt(t.vueltoBs)}</span>
-                            </div>
-                            `}
-                        </div>
-                        ` : `
-                        <div class="bg-white border border-gray-300 rounded p-2 text-xs text-gray-700">
-                            <p class="font-bold text-emerald-900 mb-0.5">Vuelto Retenido como Saldo a Favor</p>
-                            <p class="text-[11px] text-gray-600 leading-tight">
-                                El excedente de <b>Bs. ${fmt(t.vueltoBs)} ($ ${fmt(t.vueltoUsd)})</b> no genera egreso físico de caja y se asienta en el comprobante como saldo a favor retenido en el negocio.
-                            </p>
-                        </div>
-                        `}
-                    </div>`
-                    : '';
+            const estadoBalanceHtml = `<div id="contenedor-estado-balance-cuenta">${generarBalanceCuentaHtml(t)}</div>`;
 
             this.modal.innerHTML = `
             <div class="fixed inset-0 bg-black/40 flex items-center justify-center z-[100] p-4">
@@ -1872,6 +1973,65 @@ export class CuentasView {
                 });
             });
 
+            const refrescarBalanceCuentaUi = () => {
+                const t = calcularTotales();
+                const cont = this.modal.querySelector('#contenedor-estado-balance-cuenta');
+                if (cont) {
+                    cont.innerHTML = generarBalanceCuentaHtml(t);
+                    // Reconectar listeners de vuelto en el nuevo HTML
+                    this.modal.querySelector('#btn-vuelto-pagado-cuenta')?.addEventListener('click', () => {
+                        estadoVuelto = 'PAGADO';
+                        guardarBorrador();
+                        renderModalLiquidacion();
+                    });
+                    this.modal.querySelector('#btn-vuelto-retenido-cuenta')?.addEventListener('click', () => {
+                        estadoVuelto = 'RETENIDO';
+                        guardarBorrador();
+                        renderModalLiquidacion();
+                    });
+                    this.modal.querySelector<HTMLSelectElement>('#select-metodo-vuelto-cuenta')?.addEventListener('change', (e) => {
+                        metodoVuelto = (e.target as HTMLSelectElement).value;
+                        guardarBorrador();
+                        renderModalLiquidacion();
+                    });
+                    const inTasaV = this.modal.querySelector<HTMLInputElement>('#input-tasa-vuelto-cuenta');
+                    if (inTasaV) {
+                        inTasaV.addEventListener('input', (e) => {
+                            const val = parseNum((e.target as HTMLInputElement).value);
+                            tasaVuelto = val > 0 ? val : tasaCobro;
+                            guardarBorrador();
+                        });
+                        inTasaV.addEventListener('blur', () => renderModalLiquidacion());
+                    }
+                    this.modal.querySelector('#btn-reset-tasa-vuelto-cuenta')?.addEventListener('click', () => {
+                        tasaVuelto = tasaCobro;
+                        guardarBorrador();
+                        renderModalLiquidacion();
+                    });
+                }
+                const btnConf = this.modal.querySelector<HTMLButtonElement>('#modal-liq-ok');
+                if (btnConf) btnConf.disabled = !t.puedeConfirmar;
+            };
+
+            const actualizarAporteTarjetaCuenta = (item: typeof lineasCobro[0]) => {
+                const infoDiv = this.modal.querySelector(`div[data-aporte-info-cuenta="${item.id}"]`);
+                if (!infoDiv) return;
+                const tasaUsd = item.tasaCambio > 0 ? item.tasaCambio : tasaCobro;
+                const aporteBs = item.moneda === 'USD' ? item.monto * tasaUsd : item.monto;
+                const equivOficialUsd = tasaCobro > 0 ? aporteBs / tasaCobro : 0;
+                if (item.moneda === 'USD') {
+                    infoDiv.innerHTML = `
+                        <span class="font-bold text-brand-purple">Aporte: Bs. ${fmt(aporteBs)}</span>
+                        <span class="text-gray-500 font-mono">Equiv. base: $ ${fmt(equivOficialUsd)} ${tasaUsd !== tasaCobro ? `(Tasa: Bs. ${fmt(tasaUsd)} vs Base: Bs. ${fmt(tasaCobro)})` : ''}</span>
+                    `;
+                } else {
+                    infoDiv.innerHTML = `
+                        <span class="font-bold text-brand-black">Aporte directo: Bs. ${fmt(item.monto)}</span>
+                        <span class="text-gray-500 font-mono">Equiv. base: $ ${fmt(equivOficialUsd)}</span>
+                    `;
+                }
+            };
+
             // Inputs de tasa (para métodos en USD)
             this.modal.querySelectorAll<HTMLInputElement>('input[data-pago-tasa]').forEach((inp) => {
                 inp.addEventListener('input', (e) => {
@@ -1881,9 +2041,16 @@ export class CuentasView {
                     if (item) {
                         item.tasaCambio = val > 0 ? val : tasaCobro;
                         guardarBorrador();
+                        actualizarAporteTarjetaCuenta(item);
+                        refrescarBalanceCuentaUi();
+                    }
+                });
+                inp.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
                         const t = calcularTotales();
-                        const btnConf = this.modal.querySelector<HTMLButtonElement>('#modal-liq-ok');
-                        if (btnConf) btnConf.disabled = !t.puedeConfirmar;
+                        if (t.puedeConfirmar) {
+                            this.modal.querySelector<HTMLButtonElement>('#modal-liq-ok')?.click();
+                        }
                     }
                 });
                 inp.addEventListener('blur', () => {
@@ -1913,9 +2080,16 @@ export class CuentasView {
                     if (item) {
                         item.monto = val;
                         guardarBorrador();
+                        actualizarAporteTarjetaCuenta(item);
+                        refrescarBalanceCuentaUi();
+                    }
+                });
+                inp.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
                         const t = calcularTotales();
-                        const btnConf = this.modal.querySelector<HTMLButtonElement>('#modal-liq-ok');
-                        if (btnConf) btnConf.disabled = !t.puedeConfirmar;
+                        if (t.puedeConfirmar) {
+                            this.modal.querySelector<HTMLButtonElement>('#modal-liq-ok')?.click();
+                        }
                     }
                 });
                 inp.addEventListener('blur', () => {

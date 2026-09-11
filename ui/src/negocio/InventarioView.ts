@@ -1,4 +1,5 @@
 import { api, Categoria, ProductoInfo, TasaImpuesto } from './api';
+import { confirmarAccion, mostrarToast, pedirValor } from './dialogs';
 import { NegocioModel } from './NegocioModel';
 
 const sanitizarInputDecimal = (
@@ -618,17 +619,17 @@ export class InventarioView {
                 if (!id) return;
                 const privacidad = this.modelo.getConfig()?.privacidadInventario;
                 if (privacidad && !this.duenoAutenticado) {
-                    alert('Acción no permitida en modo operador. Solicite al dueño.');
+                    mostrarToast('Acción no permitida en modo operador. Solicite al dueño.', 'error');
                     return;
                 }
                 if (!this.duenoAutenticado && this.modelo.hasPinSet()) {
-                    const pin = window.prompt('Acción protegida. Ingrese el PIN de Administrador / Dueño:');
+                    const pin = await pedirValor('Acción protegida. Ingrese el PIN de Administrador / Dueño:', '', 'AUTENTICACIÓN DUEÑO');
                     if (!pin || !await this.modelo.verificarPin(pin)) {
-                        alert('PIN incorrecto o no suministrado. Acción cancelada.');
+                        mostrarToast('PIN incorrecto o no suministrado. Acción cancelada.', 'error');
                         return;
                     }
                 }
-                if (!window.confirm('¿Seguro que desea eliminar esta categoría? Los productos asociados quedarán sin categoría.')) return;
+                if (!await confirmarAccion('¿Seguro que desea eliminar esta categoría? Los productos asociados quedarán sin categoría.', 'ELIMINAR CATEGORÍA')) return;
                 void api.eliminarCategoria(id).then(() => void this.render('ajustes'));
             });
         });
@@ -837,17 +838,17 @@ export class InventarioView {
                 if (!sku || !prod) return;
                 const privacidad = this.modelo.getConfig()?.privacidadInventario;
                 if (privacidad && !this.duenoAutenticado) {
-                    alert('Acción no permitida en modo operador. Solicite al dueño.');
+                    mostrarToast('Acción no permitida en modo operador. Solicite al dueño.', 'error');
                     return;
                 }
                 if (!this.duenoAutenticado && this.modelo.hasPinSet()) {
-                    const pin = window.prompt('Acción protegida. Ingrese el PIN de Administrador / Dueño:');
+                    const pin = await pedirValor('Acción protegida. Ingrese el PIN de Administrador / Dueño:', '', 'AUTENTICACIÓN DUEÑO');
                     if (!pin || !await this.modelo.verificarPin(pin)) {
-                        alert('PIN incorrecto o no suministrado. Acción cancelada.');
+                        mostrarToast('PIN incorrecto o no suministrado. Acción cancelada.', 'error');
                         return;
                     }
                 }
-                const confirmar = window.confirm(`¿Seguro que deseas eliminar permanentemente el producto "${prod.nombre}" del catálogo?`);
+                const confirmar = await confirmarAccion(`¿Seguro que deseas eliminar permanentemente el producto "${prod.nombre}" del catálogo?`, 'ELIMINAR PRODUCTO');
                 if (confirmar) {
                     void api.eliminarProducto(sku).then(() => {
                         void api.productos().then((prods) => {
@@ -870,13 +871,13 @@ export class InventarioView {
                 if (sku && cant && Number(cant) > 0 && Number(cant) <= 9999) {
                     const privacidad = this.modelo.getConfig()?.privacidadInventario;
                     if (privacidad && !this.duenoAutenticado) {
-                        alert('Acción no permitida en modo operador. Solicite al dueño.');
+                        mostrarToast('Acción no permitida en modo operador. Solicite al dueño.', 'error');
                         return;
                     }
                     if (!this.duenoAutenticado && this.modelo.hasPinSet()) {
-                        const pin = window.prompt('Acción de inventario protegida. Ingrese el PIN de Administrador / Dueño:');
+                        const pin = await pedirValor('Acción de inventario protegida. Ingrese el PIN de Administrador / Dueño:', '', 'AUTENTICACIÓN DUEÑO');
                         if (!pin || !await this.modelo.verificarPin(pin)) {
-                            alert('PIN incorrecto o no suministrado. Operación cancelada.');
+                            mostrarToast('PIN incorrecto o no suministrado. Operación cancelada.', 'error');
                             return;
                         }
                     }
@@ -906,13 +907,13 @@ export class InventarioView {
                 if (sku && cant && Number(cant) > 0 && Number(cant) <= 9999) {
                     const privacidad = this.modelo.getConfig()?.privacidadInventario;
                     if (privacidad && !this.duenoAutenticado) {
-                        alert('Acción no permitida en modo operador. Solicite al dueño.');
+                        mostrarToast('Acción no permitida en modo operador. Solicite al dueño.', 'error');
                         return;
                     }
                     if (!this.duenoAutenticado && this.modelo.hasPinSet()) {
-                        const pin = window.prompt('Acción de inventario protegida. Ingrese el PIN de Administrador / Dueño:');
+                        const pin = await pedirValor('Acción de inventario protegida. Ingrese el PIN de Administrador / Dueño:', '', 'AUTENTICACIÓN DUEÑO');
                         if (!pin || !await this.modelo.verificarPin(pin)) {
-                            alert('PIN incorrecto o no suministrado. Operación cancelada.');
+                            mostrarToast('PIN incorrecto o no suministrado. Operación cancelada.', 'error');
                             return;
                         }
                     }
@@ -942,13 +943,13 @@ export class InventarioView {
                 if (sku && cant && Number(cant) > 0 && Number(cant) <= 9999) {
                     const privacidad = this.modelo.getConfig()?.privacidadInventario;
                     if (privacidad && !this.duenoAutenticado) {
-                        alert('Acción no permitida en modo operador. Solicite al dueño.');
+                        mostrarToast('Acción no permitida en modo operador. Solicite al dueño.', 'error');
                         return;
                     }
                     if (!this.duenoAutenticado && this.modelo.hasPinSet()) {
-                        const pin = window.prompt('Acción de inventario protegida. Ingrese el PIN de Administrador / Dueño:');
+                        const pin = await pedirValor('Acción de inventario protegida. Ingrese el PIN de Administrador / Dueño:', '', 'AUTENTICACIÓN DUEÑO');
                         if (!pin || !await this.modelo.verificarPin(pin)) {
-                            alert('PIN incorrecto o no suministrado. Operación cancelada.');
+                            mostrarToast('PIN incorrecto o no suministrado. Operación cancelada.', 'error');
                             return;
                         }
                     }
