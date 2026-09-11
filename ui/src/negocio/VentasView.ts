@@ -1,5 +1,6 @@
 import { api, JornadaLaboral, Ticket } from './api';
 import { NegocioModel } from './NegocioModel';
+import { formatFechaHoraVet } from './dateUtils';
 
 export const parseNum = (n: unknown): number => {
     if (typeof n === 'number') return Number.isFinite(n) ? n : 0;
@@ -84,9 +85,9 @@ const exportarJornadaCsv = (j: JornadaLaboral, tickets: Ticket[]): void => {
             : 'DIRECTO';
         return [
             t.ventaId,
-            t.fechaHora || '',
+            t.fechaUnix && t.fechaUnix > 0 ? formatFechaHoraVet(t.fechaUnix) : (t.fechaHora || ''),
             t.canal || 'VENTA DIRECTA',
-            t.operador || 'Caja',
+            t.operador || 'Principal',
             metodos,
             `$${fmt(t.totalUsd)}`,
             `Bs. ${fmt(t.totalBs)}`,
@@ -395,10 +396,10 @@ export class VentasView {
                 return `
                 <tr class="hover:bg-gray-50 transition-colors">
                     <td class="py-1.5 px-2 font-mono text-brand-purple text-[10px]">${t.ventaId}</td>
-                    <td class="py-1.5 px-2 text-gray-500 text-[10px]">${t.fechaHora || '-'}</td>
+                    <td class="py-1.5 px-2 text-gray-500 text-[10px]">${t.fechaUnix && t.fechaUnix > 0 ? formatFechaHoraVet(t.fechaUnix) : (t.fechaHora || '-')}</td>
                     <td class="py-1.5 px-2">${canalBadge}</td>
                     <td class="py-1.5 px-2">${metodoBadge}</td>
-                    <td class="py-1.5 px-2 text-gray-700 text-[10px]">${t.operador || 'Caja'}</td>
+                    <td class="py-1.5 px-2 text-gray-700 text-[10px]">${t.operador || 'Principal'}</td>
                     <td class="py-1.5 px-2 text-right font-black text-brand-black text-[10px]">$ ${fmt(t.totalUsd)}</td>
                     <td class="py-1.5 px-2 text-right font-black text-brand-purple text-[10px]">Bs. ${fmt(t.totalBs)}</td>
                     <td class="py-1.5 px-2 text-center">
@@ -557,7 +558,7 @@ export class VentasView {
                         <div>
                             <span class="text-[10px] uppercase font-black tracking-widest text-brand-purple">Comprobante de Venta</span>
                             <h3 class="font-heading font-black text-2xl">${ticket.ventaId}</h3>
-                            <p class="text-xs text-gray-600 font-bold mt-0.5">${ticket.fechaHora || 'Hoy'} · Canal: ${ticket.canal || 'VENTA DIRECTA'}</p>
+                            <p class="text-xs text-gray-600 font-bold mt-0.5">${ticket.fechaUnix && ticket.fechaUnix > 0 ? formatFechaHoraVet(ticket.fechaUnix) : (ticket.fechaHora || 'Hoy')} · Canal: ${ticket.canal || 'VENTA DIRECTA'}</p>
                         </div>
                         <button id="modal-ticket-cerrar" class="w-8 h-8 rounded border-2 border-brand-black font-black flex items-center justify-center hover:bg-gray-100">
                             &times;
@@ -567,7 +568,7 @@ export class VentasView {
                     <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3 bg-gray-50 border border-brand-black rounded p-3 text-xs">
                         <div>
                             <span class="text-[10px] text-gray-500 font-bold uppercase block">Operador / Mesa</span>
-                            <span class="font-bold text-gray-900">${ticket.operador || 'Caja'}</span>
+                            <span class="font-bold text-gray-900">${ticket.operador || 'Principal'}</span>
                         </div>
                         <div>
                             <span class="text-[10px] text-gray-500 font-bold uppercase block">Tasa BCV Auditada</span>

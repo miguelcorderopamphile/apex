@@ -619,8 +619,6 @@ pub struct Jornada {
     pub checksum_sha256: Option<String>,
 }
 
-
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SemaforoStock {
     pub rojo_max: u32,

@@ -1,4 +1,4 @@
-; DatioLabs Retail - Instalador Oficial
+﻿; DatioLabs Retail - Instalador Oficial
 ; Codificación UTF-8 para evitar caracteres rotos
 Unicode true
 
@@ -7,6 +7,7 @@ SetCompressorDictSize 32
 SetDatablockOptimize on
 
 !define PRODUCT_NAME "DatioLabs Retail"
+Name "${PRODUCT_NAME}"
 !define PRODUCT_VERSION "1.0.0"
 !define PRODUCT_PUBLISHER "DatioLabs Enterprise"
 !define PRODUCT_WEB_SITE "https://datiolabs.com"

@@ -658,7 +658,7 @@ export class CuentasView {
                 } else {
                     grid.innerHTML = filtrados.map((p) => {
                         const agotado = !p.sinStock && (Number(p.stock) <= 0);
-                        const tienePaquete = p.precioPaqueteUsd && p.nombrePaquete;
+                        const tienePaquete = (p.precioPaqueteUsd && p.nombrePaquete) || (p.esCaja && p.unidadesPorCaja && p.unidadesPorCaja > 1);
                         return `
                         <div class="relative" data-producto-row="${p.sku}">
                             <button data-add-sku="${p.sku}" data-modo="unidad" data-agotado="${agotado ? "1" : "0"}" class="text-left border-2 border-brand-black rounded p-2 transition-all text-xs font-bold ${agotado ? "bg-gray-100 opacity-60 cursor-not-allowed" : "bg-gray-50 hover:bg-white shadow-sm hover:shadow-brutal-sm"} w-full">

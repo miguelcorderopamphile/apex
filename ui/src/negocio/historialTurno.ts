@@ -136,18 +136,54 @@ export async function abrirModalHistorialTurno(modalHost: HTMLElement): Promise<
                     <span class="text-xs font-heading font-black uppercase text-gray-700">Tickets del Turno (${ticketsTurno.length})</span>
                     <span class="text-[10px] font-bold text-gray-500">Hora VET · Canal · Total</span>
                 </div>
-                <div class="space-y-1.5 overflow-y-auto max-h-56 pr-1">
+                <div class="space-y-2 overflow-y-auto max-h-72 pr-1">
                     ${ticketsTurno.length === 0
                         ? `<p class="py-6 text-center text-xs text-gray-400 font-bold">No se han emitido tickets durante el turno actual.</p>`
-                        : ticketsTurno.map(t => `
-                            <div class="flex items-center justify-between border border-brand-black bg-white rounded p-2 text-xs font-bold hover:bg-amber-50/50">
-                                <div>
-                                    <p class="font-mono text-brand-black">${t.ventaId.slice(0, 10)} · <span class="text-[10px] text-gray-500">${formatFechaHoraVet(t.fechaUnix)}</span></p>
-                                    <p class="text-[10px] text-brand-purple font-black uppercase">${t.canal || 'VENTA DIRECTA'} ${t.operador ? `· Cajero: ${t.operador}` : ''}</p>
+                        : ticketsTurno.map((t) => `
+                            <div class="border border-brand-black bg-white rounded overflow-hidden shadow-sm">
+                                <div class="flex items-center justify-between p-2.5 text-xs font-bold hover:bg-amber-50/50 cursor-pointer select-none" data-toggle-ticket-detalle="${t.ventaId}">
+                                    <div class="min-w-0 flex-1 pr-2">
+                                        <div class="flex items-center gap-2">
+                                            <span class="font-mono text-brand-black font-black">${t.ventaId}</span>
+                                            <span class="text-[10px] text-gray-500 font-bold">${formatFechaHoraVet(t.fechaUnix)}</span>
+                                        </div>
+                                        <p class="text-[10px] text-brand-purple font-black uppercase mt-0.5">
+                                            ${t.canal || 'VENTA DIRECTA'} ${t.operador ? `· Cajero: <strong class="text-brand-black">${t.operador}</strong>` : ''}
+                                        </p>
+                                    </div>
+                                    <div class="text-right shrink-0 flex items-center gap-3">
+                                        <div>
+                                            <p class="font-heading font-black text-sm text-brand-black">$${fmt(t.totalUsd)}</p>
+                                            <p class="text-[10px] font-bold text-brand-purple">Bs. ${fmt(t.totalBs)}</p>
+                                        </div>
+                                        <span class="text-xs font-black text-gray-500 px-1 py-0.5 border border-gray-300 rounded bg-gray-50" data-arrow-detalle="${t.ventaId}">▼</span>
+                                    </div>
                                 </div>
-                                <div class="text-right">
-                                    <p class="font-heading font-black text-sm text-brand-black">$${fmt(t.totalUsd)}</p>
-                                    <p class="text-[10px] font-bold text-gray-500">Bs. ${fmt(t.totalBs)}</p>
+                                <div id="detalle-ticket-${t.ventaId}" class="hidden border-t border-brand-black bg-gray-50 p-2.5 text-xs">
+                                    <p class="text-[10px] font-heading font-black uppercase text-gray-600 mb-1.5">Artículos y Servicios Despachados:</p>
+                                    <div class="space-y-1 mb-2">
+                                        ${(t.lineas && t.lineas.length > 0)
+                                            ? t.lineas.map(l => `
+                                                <div class="flex justify-between items-center text-[11px] border-b border-gray-200 pb-1">
+                                                    <div class="min-w-0 flex-1 pr-2">
+                                                        <span class="font-bold text-gray-800">${l.nombre}</span>
+                                                        <span class="text-[10px] text-gray-500 block">${l.cantidad} × $${fmt(l.precioUsd)} ${l.modoVenta === 'paquete' ? '(Empaque/Caja)' : ''}</span>
+                                                    </div>
+                                                    <div class="text-right shrink-0 font-mono font-bold">
+                                                        <span class="text-brand-black">$${fmt(l.subtotalUsd)}</span>
+                                                        <span class="text-[10px] text-gray-500 block">Bs. ${fmt(l.subtotalBs)}</span>
+                                                    </div>
+                                                </div>
+                                            `).join('')
+                                            : `<p class="text-[10px] text-gray-400 italic">Detalle de líneas no disponible en este comprobante.</p>`
+                                        }
+                                    </div>
+                                    ${(t.pagos && t.pagos.length > 0) ? `
+                                        <div class="pt-1.5 border-t border-gray-200 flex flex-wrap justify-between items-center text-[10px] font-bold text-gray-600">
+                                            <span>Pagos: ${t.pagos.map(p => `${p.metodo} ($${fmt(p.montoUsd)}${p.moneda === 'BS' ? ` / Bs.${fmt(p.montoBs)}` : ''})`).join(', ')}</span>
+                                            ${t.vueltoBs && parseNum(t.vueltoBs) > 0 ? `<span class="text-emerald-800">Vuelto: Bs. ${fmt(t.vueltoBs)} (${t.estadoVuelto || 'PAGADO'})</span>` : ''}
+                                        </div>
+                                    ` : ''}
                                 </div>
                             </div>
                         `).join('')}
@@ -161,6 +197,24 @@ export async function abrirModalHistorialTurno(modalHost: HTMLElement): Promise<
             </div>
         </div>
     </div>`;
+
+    modalHost.querySelectorAll('[data-toggle-ticket-detalle]').forEach(el => {
+        el.addEventListener('click', () => {
+            const vId = (el as HTMLElement).dataset.toggleTicketDetalle;
+            const det = modalHost.querySelector(`#detalle-ticket-${vId}`);
+            const arr = modalHost.querySelector(`[data-arrow-detalle="${vId}"]`);
+            if (det) {
+                const oculto = det.classList.contains('hidden');
+                if (oculto) {
+                    det.classList.remove('hidden');
+                    if (arr) arr.textContent = '▲';
+                } else {
+                    det.classList.add('hidden');
+                    if (arr) arr.textContent = '▼';
+                }
+            }
+        });
+    });
 
     const cerrar = () => { modalHost.innerHTML = ''; };
     modalHost.querySelector('#btn-cerrar-historial-turno')?.addEventListener('click', cerrar);

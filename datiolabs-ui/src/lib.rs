@@ -9,9 +9,9 @@ use datiolabs_core::capacidades::{
 };
 use datiolabs_core::db::{Database as Ledger, DbError};
 use datiolabs_core::models::{
-    Catalogo, Categoria, ConfigNegocio, EstadoVenta, Jornada, LineasVenta,
-    MetodoPagoConfig, MotivoMovimiento, MovimientoStock, Nombre, Operador, PagoVenta, Producto,
-    SemaforoStock, Sku, TasaImpuesto, Venta,
+    Catalogo, Categoria, ConfigNegocio, EstadoVenta, Jornada, LineasVenta, MetodoPagoConfig,
+    MotivoMovimiento, MovimientoStock, Nombre, Operador, PagoVenta, Producto, SemaforoStock, Sku,
+    TasaImpuesto, Venta,
 };
 use datiolabs_core::modulos::licoreria;
 use datiolabs_core::modulos::panaderia::Lote;
@@ -1517,6 +1517,15 @@ async fn api_ventas_registrar(
         )?;
     }
 
+    // Capturar operador activo de la jornada para trazabilidad del ticket
+    let operador_activo: Option<String> = db.jornada_actual().ok().flatten().map(|j| {
+        if !j.operadores_activos.is_empty() {
+            j.operadores_activos.join(", ")
+        } else {
+            j.operador_actual.clone()
+        }
+    });
+
     let venta = datiolabs_core::models::Venta {
         id: venta_id,
         etiqueta: String::new(),
@@ -1537,7 +1546,7 @@ async fn api_ventas_registrar(
         fecha_cierre_unix: ahora_unix(),
         firma_sha256: String::new(),
         tipo: "venta".to_string(),
-        cliente: None,
+        cliente: operador_activo,
         nota: None,
         abonos_usd: None,
         abonos_bs: None,
@@ -2224,8 +2233,6 @@ async fn api_jornadas_relevar(
         serde_json::to_value(jornada).unwrap_or(serde_json::json!({})),
     ))
 }
-
-
 
 // Semaforo
 async fn api_semaforo_obtener(
@@ -3601,6 +3608,15 @@ fn registrar_venta(
             descontar_con_lotes_interno(db, &catalogo, *idx, *cantidad, &venta_id, modo)?;
         }
 
+        // Capturar operador activo de la jornada para trazabilidad del ticket
+        let operador_activo: Option<String> = db.jornada_actual().ok().flatten().map(|j| {
+            if !j.operadores_activos.is_empty() {
+                j.operadores_activos.join(", ")
+            } else {
+                j.operador_actual.clone()
+            }
+        });
+
         let venta = Venta {
             id: venta_id,
             etiqueta: String::new(),
@@ -3621,7 +3637,7 @@ fn registrar_venta(
             fecha_cierre_unix: ahora_unix(),
             firma_sha256: String::new(),
             tipo: "venta".to_string(),
-            cliente: None,
+            cliente: operador_activo,
             nota: None,
             abonos_usd: None,
             abonos_bs: None,
@@ -3696,8 +3712,12 @@ fn armar_ticket(venta: &Venta, recibido: Decimal, vuelto: Decimal) -> TicketDto 
         },
         monto_vuelto_usd: venta.monto_vuelto_usd.map(|m| m.to_string()),
         tasa_vuelto: venta.tasa_vuelto.map(|t| t.to_string()),
-        fecha_hora: chrono::DateTime::from_timestamp(venta.fecha_cierre_unix, 0)
-            .map(|dt| dt.format("%d/%m/%Y %H:%M").to_string()),
+        fecha_hora: chrono::DateTime::from_timestamp(venta.fecha_cierre_unix, 0).map(|dt| {
+            let tz_vet = chrono::FixedOffset::east_opt(-4 * 3600).unwrap();
+            dt.with_timezone(&tz_vet)
+                .format("%d/%m/%Y %H:%M")
+                .to_string()
+        }),
         canal: Some(if venta.es_cuenta_abierta {
             "CONSUMO EN CUENTA".to_string()
         } else if venta.tipo == "deuda" {
@@ -3705,7 +3725,7 @@ fn armar_ticket(venta: &Venta, recibido: Decimal, vuelto: Decimal) -> TicketDto 
         } else {
             "VENTA DIRECTA".to_string()
         }),
-        operador: None,
+        operador: venta.cliente.clone(),
         fecha_unix: venta.fecha_cierre_unix,
         lineas: (0..venta.lineas.skus.len())
             .map(|i| {
@@ -3966,6 +3986,16 @@ fn cerrar_cuenta(
         venta.monto_vuelto_usd = monto_v_usd;
         venta.tasa_vuelto = tasa_v;
         venta.fecha_cierre_unix = ahora_unix();
+        // Si la cuenta no tenia cliente (operador) asignado, capturar el activo en la jornada
+        if venta.cliente.is_none() {
+            venta.cliente = db.jornada_actual().ok().flatten().map(|j| {
+                if !j.operadores_activos.is_empty() {
+                    j.operadores_activos.join(", ")
+                } else {
+                    j.operador_actual.clone()
+                }
+            });
+        }
         let cerrada = db.guardar_venta(venta)?;
 
         if abonos_usd > cierre.total_usd {
@@ -4716,8 +4746,6 @@ fn alternar_operador(estado: tauri::State<AppState>, id: String) -> Result<Vec<O
     notificar_panel(&estado);
     Ok(con_ledger(&estado, |db| db.listar_operadores())?)
 }
-
-
 
 // ---------------- comandos: semaforo stock ----------------
 

@@ -1,7 +1,7 @@
 use crate::capacidades::ErrorNegocio;
 use crate::models::{
-    Catalogo, Categoria, ConfigNegocio, EventoTasaBcv, Jornada,
-    MetodoPagoConfig, MovimientoStock, Operador, Producto, SemaforoStock, TasaImpuesto, Venta,
+    Catalogo, Categoria, ConfigNegocio, EventoTasaBcv, Jornada, MetodoPagoConfig, MovimientoStock,
+    Operador, Producto, SemaforoStock, TasaImpuesto, Venta,
 };
 use crate::modulos::panaderia::{LibroLotes, Lote};
 use rust_decimal::Decimal;
@@ -310,8 +310,6 @@ impl Database {
         tree.insert(j.id.as_bytes(), bincode::serialize(j)?)?;
         Ok(())
     }
-
-
 
     // ---------------- semaforo stock ----------------
 
@@ -1076,7 +1074,9 @@ mod tests {
         assert_eq!(meta_exp.checksum_sha256, meta_imp.checksum_sha256);
 
         let cat = db2.cargar_catalogo().unwrap();
-        let idx = cat.indice_de("BEBIDA-PACK").expect("Producto recuperado en catálogo");
+        let idx = cat
+            .indice_de("BEBIDA-PACK")
+            .expect("Producto recuperado en catálogo");
         assert_eq!(cat.stock(idx), dec!(48));
         assert!(cat.es_caja(idx));
         assert_eq!(cat.unidades_por_caja(idx), Some(6));
