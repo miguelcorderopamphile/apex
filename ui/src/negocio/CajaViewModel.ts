@@ -22,7 +22,7 @@ interface LineaCarrito {
     conVariantes: boolean;
     serie?: string;
     variante?: string;
-    modoVenta: 'unidad' | 'paquete';
+    modoVenta: string;
 }
 
 export class CajaViewModel {
@@ -73,14 +73,14 @@ export class CajaViewModel {
         return this.carrito;
     }
 
-    private tasaBloqueadaTicket: number | null = null;
-
     get tasaTicket(): number {
         return this.tasaBloqueadaTicket ?? this.modelo.tasaActual;
     }
 
+    private tasaBloqueadaTicket: number | null = null;
+
     get totalUsd(): number {
-        return this.carrito.reduce((a, l) => a + l.precioUsd * l.cantidad, 0);
+        return this.carrito.reduce((acc, l) => acc + l.precioUsd * l.cantidad, 0);
     }
 
     get totalBs(): number {
@@ -112,20 +112,30 @@ export class CajaViewModel {
         this.edadConfirmadaSesion = v;
     }
 
-    async agregar(sku: string, modoVenta: 'unidad' | 'paquete' = 'unidad'): Promise<string | null> {
+    async agregar(sku: string, modoVenta: string = 'unidad'): Promise<string | null> {
         const p = this.productos.find((x) => x.sku === sku);
         if (!p) return 'Producto no encontrado';
         if (this.requiereEdad(p)) return 'EDAD|' + p.nombre;
         return this.empujar(p, undefined, undefined, modoVenta);
     }
 
-    empujar(p: ProductoInfo, serie?: string, variante?: string, modoVenta: 'unidad' | 'paquete' = 'unidad'): string | null {
-        const esPaquete = modoVenta === 'paquete' && (p.precioPaqueteUsd || (p.esCaja && p.unidadesPorCaja && p.unidadesPorCaja > 1));
-        const unidadesPaquete = esPaquete ? (p.unidadesPorCaja || 1) : 1;
-        const precioEfectivo = esPaquete
-            ? (p.precioPaqueteUsd ? Number(p.precioPaqueteUsd) : Number(p.precioUsd) * unidadesPaquete)
-            : Number(p.precioUsd);
-        const pesable = !esPaquete && ((p.capacidades & CAP_PESABLE) !== 0 || p.unidad === 'kg' || p.unidad === 'ml');
+    empujar(p: ProductoInfo, serie?: string, variante?: string, modoVenta: string = 'unidad'): string | null {
+        const pres = modoVenta && modoVenta !== 'unidad' && p.presentaciones
+            ? p.presentaciones.find((x) => x.nombre.toLowerCase() === modoVenta.toLowerCase())
+            : undefined;
+
+        const esPaquete = !pres && modoVenta === 'paquete' && (p.precioPaqueteUsd || (p.esCaja && p.unidadesPorCaja && p.unidadesPorCaja > 1));
+        const unidadesMultiples = pres
+            ? pres.unidades
+            : (esPaquete ? (p.unidadesPorCaja || 1) : 1);
+
+        const precioEfectivo = pres
+            ? Number(pres.precioUsd)
+            : (esPaquete
+                ? (p.precioPaqueteUsd ? Number(p.precioPaqueteUsd) : Number(p.precioUsd) * unidadesMultiples)
+                : Number(p.precioUsd));
+
+        const pesable = !pres && !esPaquete && ((p.capacidades & CAP_PESABLE) !== 0 || p.unidad === 'kg' || p.unidad === 'ml');
         const paso = pesable ? 0.25 : 1;
         const existente = this.carrito.find((l) => l.sku === p.sku && l.serie === serie && l.variante === variante && l.modoVenta === modoVenta);
         const cantActual = existente ? existente.cantidad : 0;
@@ -134,8 +144,8 @@ export class CajaViewModel {
         // Validación de stock: no permitir si no es servicio o venta libre
         if (!p.sinStock) {
             const stockDisponible = Number(p.stock);
-            if (stockDisponible < cantDeseada * unidadesPaquete) {
-                return `Stock insuficiente para ${p.nombre}. Disponible: ${stockDisponible}, Solicitado: ${cantDeseada * unidadesPaquete}`;
+            if (stockDisponible < cantDeseada * unidadesMultiples) {
+                return `Stock insuficiente para ${p.nombre}. Disponible: ${stockDisponible}, Solicitado: ${cantDeseada * unidadesMultiples}`;
             }
         }
 
@@ -179,8 +189,20 @@ export class CajaViewModel {
         }
     }
 
-    cambiarCantidad(sku: string, valor: number): string | null {
-        const linea = this.carrito.find((l) => l.sku === sku);
+    private obtenerFactorPresentacion(prod: ProductoInfo | undefined, modoVenta: string): number {
+        if (!prod) return 1;
+        if (modoVenta && modoVenta !== 'unidad' && prod.presentaciones) {
+            const pres = prod.presentaciones.find((x) => x.nombre.toLowerCase() === modoVenta.toLowerCase());
+            if (pres) return pres.unidades;
+        }
+        if (modoVenta === 'paquete' && prod.esCaja && prod.unidadesPorCaja) {
+            return prod.unidadesPorCaja;
+        }
+        return 1;
+    }
+
+    cambiarCantidad(sku: string, valor: number, modoVenta?: string): string | null {
+        const linea = this.carrito.find((l) => l.sku === sku && (modoVenta === undefined || l.modoVenta === modoVenta));
         if (!linea) return null;
         const prod = this.productos.find((p) => p.sku === sku);
         
@@ -191,19 +213,19 @@ export class CajaViewModel {
             limpia = Math.round(limpia * 1000) / 1000;
         }
 
-        const factor = linea.modoVenta === 'paquete' && prod?.esCaja && prod?.unidadesPorCaja ? prod.unidadesPorCaja : 1;
+        const factor = this.obtenerFactorPresentacion(prod, linea.modoVenta);
         if (prod && !prod.sinStock && (limpia * factor) > Number(prod.stock)) {
             return `Stock insuficiente para ${linea.nombre}. Disponible: ${prod.stock} un., Solicitado: ${limpia * factor} un.`;
         }
 
         linea.cantidad = limpia;
-        if (linea.cantidad === 0) this.quitar(sku);
+        if (linea.cantidad === 0) this.quitar(sku, linea.modoVenta);
         else this.notificar();
         return null;
     }
 
-    quitar(sku: string): void {
-        this.carrito = this.carrito.filter((l) => l.sku !== sku);
+    quitar(sku: string, modoVenta?: string): void {
+        this.carrito = this.carrito.filter((l) => !(l.sku === sku && (modoVenta === undefined || l.modoVenta === modoVenta)));
         if (this.carrito.length === 0) this.tasaBloqueadaTicket = null;
         this.notificar();
     }
@@ -223,7 +245,7 @@ export class CajaViewModel {
         // Verificación previa de existencias multiplicando por unidades de presentación
         for (const l of this.carrito) {
             const p = this.productos.find((x) => x.sku === l.sku);
-            const factor = l.modoVenta === 'paquete' && p?.esCaja && p?.unidadesPorCaja ? p.unidadesPorCaja : 1;
+            const factor = this.obtenerFactorPresentacion(p, l.modoVenta);
             const unidadesRequeridas = l.cantidad * factor;
             if (p && !p.sinStock && unidadesRequeridas > Number(p.stock)) {
                 throw new Error(`Stock insuficiente para ${p.nombre}. Disponible: ${p.stock} un., En carrito: ${unidadesRequeridas} un.`);
@@ -253,7 +275,7 @@ export class CajaViewModel {
         this.notificar();
     }
 
-    async agregarACuenta(sku: string, modoVenta: 'unidad' | 'paquete' = 'unidad'): Promise<string | null> {
+    async agregarACuenta(sku: string, modoVenta: string = 'unidad'): Promise<string | null> {
         if (!this.cuentaSeleccionada) return 'Selecciona una cuenta primero';
         const p = this.productos.find((x) => x.sku === sku);
         if (!p) return 'Producto no encontrado';

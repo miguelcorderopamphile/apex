@@ -1359,16 +1359,16 @@ export class CajaView {
                             <div class="flex-1 min-w-0 pr-2">
                                 <p class="font-heading font-bold text-sm truncate" title="${l.nombre}">
                                     ${l.nombre}
-                                    ${l.modoVenta === 'paquete' ? '<span class="inline-block ml-1 text-[9px] font-black bg-purple-100 text-purple-800 border border-brand-purple rounded px-1">paquete</span>' : ''}
+                                    ${l.modoVenta !== 'unidad' ? `<span class="inline-block ml-1 text-[9px] font-black bg-purple-100 text-purple-800 border border-brand-purple rounded px-1">${l.modoVenta}</span>` : ''}
                                 </p>
                                 <p class="text-xs text-gray-600 font-bold">$${l.precioUsd.toFixed(2)} · Bs. ${this.modelo.bs(Number((l.precioUsd * l.cantidad).toFixed(2)))}</p>
                             </div>
                             ${l.pesable
-                                ? `<input type="number" step="0.05" min="0.01" max="999.99" maxlength="6" value="${Number(l.cantidad.toFixed(3))}" data-qty="${l.sku}" class="w-20 border-2 border-brand-black rounded px-1 py-0.5 text-right font-bold text-sm" />`
-                                : `<button data-menos="${l.sku}" class="w-7 h-7 border-2 border-brand-black rounded font-black bg-amber-100 text-sm">-</button>
+                                ? `<input type="number" step="0.05" min="0.01" max="999.99" maxlength="6" value="${Number(l.cantidad.toFixed(3))}" data-qty="${l.sku}" data-modo="${l.modoVenta}" class="w-20 border-2 border-brand-black rounded px-1 py-0.5 text-right font-bold text-sm" />`
+                                : `<button data-menos="${l.sku}" data-modo="${l.modoVenta}" class="w-7 h-7 border-2 border-brand-black rounded font-black bg-amber-100 text-sm">-</button>
                                    <span class="font-black w-5 text-center text-sm">${l.cantidad}</span>
-                                   <button data-mas="${l.sku}" class="w-7 h-7 border-2 border-brand-black rounded font-black bg-emerald-100 text-sm">+</button>`}
-                            <button data-quitar="${l.sku}" class="w-7 h-7 border-2 border-brand-black rounded font-black bg-red-100 text-red-800 text-sm hover:bg-red-600 hover:text-white transition-colors">&times;</button>
+                                   <button data-mas="${l.sku}" data-modo="${l.modoVenta}" class="w-7 h-7 border-2 border-brand-black rounded font-black bg-emerald-100 text-sm">+</button>`}
+                            <button data-quitar="${l.sku}" data-modo="${l.modoVenta}" class="w-7 h-7 border-2 border-brand-black rounded font-black bg-red-100 text-red-800 text-sm hover:bg-red-600 hover:text-white transition-colors">&times;</button>
                         </div>
                     </div>`,
                           )
@@ -1434,9 +1434,10 @@ export class CajaView {
         this.contenedor.querySelectorAll('[data-mas]').forEach((b) =>
             b.addEventListener('click', () => {
                 const sku = (b as HTMLElement).dataset.mas ?? '';
-                const l = this.vm.lineasCarrito.find((x) => x.sku === sku);
+                const modo = (b as HTMLElement).dataset.modo ?? 'unidad';
+                const l = this.vm.lineasCarrito.find((x) => x.sku === sku && x.modoVenta === modo);
                 if (l) {
-                    const err = this.vm.cambiarCantidad(sku, l.cantidad + 1);
+                    const err = this.vm.cambiarCantidad(sku, l.cantidad + 1, modo);
                     if (err) this.mostrarError(err);
                 }
             }),
@@ -1444,19 +1445,25 @@ export class CajaView {
         this.contenedor.querySelectorAll('[data-menos]').forEach((b) =>
             b.addEventListener('click', () => {
                 const sku = (b as HTMLElement).dataset.menos ?? '';
-                const l = this.vm.lineasCarrito.find((x) => x.sku === sku);
-                if (l) this.vm.cambiarCantidad(sku, Math.max(1, l.cantidad - 1));
+                const modo = (b as HTMLElement).dataset.modo ?? 'unidad';
+                const l = this.vm.lineasCarrito.find((x) => x.sku === sku && x.modoVenta === modo);
+                if (l) this.vm.cambiarCantidad(sku, Math.max(1, l.cantidad - 1), modo);
             }),
         );
         this.contenedor.querySelectorAll('[data-quitar]').forEach((b) =>
-            b.addEventListener('click', () => this.vm.quitar((b as HTMLElement).dataset.quitar ?? '')),
+            b.addEventListener('click', () => {
+                const sku = (b as HTMLElement).dataset.quitar ?? '';
+                const modo = (b as HTMLElement).dataset.modo ?? 'unidad';
+                this.vm.quitar(sku, modo);
+            }),
         );
         this.contenedor.querySelectorAll<HTMLInputElement>('input[data-qty]').forEach((inp) =>
             inp.addEventListener('change', () => {
                 const raw = Number(inp.value || '0');
+                const modo = inp.dataset.modo ?? 'unidad';
                 const val = Math.min(999.99, Math.max(0.01, Number.isFinite(raw) ? raw : 0.01));
                 inp.value = String(val);
-                const err = this.vm.cambiarCantidad(inp.dataset.qty ?? '', val);
+                const err = this.vm.cambiarCantidad(inp.dataset.qty ?? '', val, modo);
                 if (err) this.mostrarError(err);
             }),
         );
