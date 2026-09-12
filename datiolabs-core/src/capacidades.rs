@@ -115,6 +115,63 @@ pub fn validar_vigencia(caduce_unix: i64, ahora_unix: i64) -> Result<(), ErrorNe
     Ok(())
 }
 
+/// Calcula el checksum ponderado de los primeros 12 digitos decimales.
+pub fn calcular_checksum_licencia(digitos_12: &[u8; 12]) -> u16 {
+    let mut suma: u32 = 0;
+    for (i, &d) in digitos_12.iter().enumerate() {
+        suma += (d as u32) * (i as u32 + 1);
+    }
+    (suma % 10000) as u16
+}
+
+/// Genera una clave de licencia universal de 16 digitos decimales unica y verificable.
+/// Los primeros 12 digitos se derivan de entropia (semilla/RNG seguro) y los ultimos 4
+/// codifican el checksum ponderado determinista de integridad.
+pub fn generar_licencia_universal() -> String {
+    use rand::RngExt;
+    let mut rng = rand::rng();
+    let mut digitos = [0u8; 12];
+    for d in &mut digitos {
+        *d = rng.random_range(0..10);
+    }
+    let checksum = calcular_checksum_licencia(&digitos);
+    format!(
+        "{:01}{:01}{:01}{:01}{:01}{:01}{:01}{:01}{:01}{:01}{:01}{:01}{:04}",
+        digitos[0],
+        digitos[1],
+        digitos[2],
+        digitos[3],
+        digitos[4],
+        digitos[5],
+        digitos[6],
+        digitos[7],
+        digitos[8],
+        digitos[9],
+        digitos[10],
+        digitos[11],
+        checksum
+    )
+}
+
+/// Valida una clave de licencia universal de 16 digitos decimales.
+pub fn validar_licencia_universal(clave: &str) -> bool {
+    let limpio: String = clave.chars().filter(|c| c.is_ascii_digit()).collect();
+    if limpio.len() != 16 {
+        return false;
+    }
+    let bytes = limpio.as_bytes();
+    let mut digitos = [0u8; 12];
+    for (d, &b) in digitos.iter_mut().zip(&bytes[..12]) {
+        *d = b - b'0';
+    }
+    let checksum = calcular_checksum_licencia(&digitos);
+    let mut esperado: u16 = 0;
+    for &b in &bytes[12..16] {
+        esperado = esperado * 10 + (b - b'0') as u16;
+    }
+    checksum == esperado
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,5 +228,22 @@ mod tests {
             validar_vigencia(2000, 2000),
             Err(ErrorNegocio::LoteVencido { caduco_unix: 2000 })
         );
+    }
+
+    #[test]
+    fn licencia_universal_generacion_y_validacion_determinista() {
+        // Validación de formato y checksum de 16 dígitos
+        for _ in 0..50 {
+            let lic = generar_licencia_universal();
+            assert_eq!(lic.len(), 16);
+            assert!(lic.chars().all(|c| c.is_ascii_digit()));
+            assert!(validar_licencia_universal(&lic));
+        }
+
+        // Claves inválidas
+        assert!(!validar_licencia_universal("123456789012345")); // 15 dígitos
+        assert!(!validar_licencia_universal("12345678901234567")); // 17 dígitos
+        assert!(!validar_licencia_universal("1234567890129999")); // Checksum incorrecto
+        assert!(!validar_licencia_universal(""));
     }
 }

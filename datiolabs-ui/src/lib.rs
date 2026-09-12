@@ -3243,45 +3243,25 @@ struct LicenciaDto {
     validez: String,
 }
 
-fn validar_clave_licencia(clave: &str, rubros: u16) -> bool {
-    let limpio: String = clave.chars().filter(|c| c.is_alphanumeric()).collect();
-    if limpio.len() != 16 {
-        return false;
-    }
-    let digitos: Vec<u16> = limpio
-        .bytes()
-        .map(|b| (b - b'0') as u16)
-        .filter(|&d| d < 10)
-        .collect();
-    if digitos.len() != 16 {
-        return false;
-    }
-    let _rubro_code = rubros & 0x0F;
-    let mut suma: u32 = 0;
-    for i in 0..12 {
-        suma += digitos[i] as u32 * (i as u32 + 1);
-    }
-    let checksum = (suma % 10000) as u16;
-    let esperado = digitos[12] * 1000 + digitos[13] * 100 + digitos[14] * 10 + digitos[15];
-    checksum == esperado
+fn validar_clave_licencia(clave: &str, _rubros: u16) -> bool {
+    datiolabs_core::capacidades::validar_licencia_universal(clave)
+}
+
+#[tauri::command]
+fn generar_licencia() -> Result<String, UIError> {
+    Ok(datiolabs_core::capacidades::generar_licencia_universal())
 }
 
 #[tauri::command]
 fn obtener_licencia(estado: tauri::State<AppState>) -> Result<LicenciaDto, UIError> {
     let cfg = config_requerida(&estado)?;
-    let tipo = match cfg.rubros {
-        r if r & 1 != 0 => "Enterprise Abasto",
-        r if r & 2 != 0 => "Enterprise Panaderia",
-        r if r & 4 != 0 => "Enterprise Licoreria",
-        r if r & 8 != 0 => "Enterprise Retail",
-        _ => "Enterprise Standalone Local",
-    };
+    let tipo = "DatioLabs Enterprise Universal";
     Ok(LicenciaDto {
         estado: cfg.licencia_estado,
         tipo: tipo.to_string(),
         clave_licencia: cfg.licencia_clave,
         titular: cfg.licencia_titular,
-        validez: "Perpetua (Sin caducidad)".to_string(),
+        validez: "Perpetua (Sin caducidad / Portabilidad Total)".to_string(),
     })
 }
 
@@ -5599,6 +5579,7 @@ pub fn run() {
             validar_pin_dueno,
             obtener_licencia,
             validar_licencia,
+            generar_licencia,
             crear_producto,
             listar_productos,
             compra_stock,

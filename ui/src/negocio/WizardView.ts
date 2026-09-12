@@ -1,19 +1,5 @@
-import { api, ConfigInfo, RUBRO_UNIVERSAL } from './api';
+import { api, ConfigInfo, RUBRO_UNIVERSAL, validarLicenciaUniversal } from './api';
 import { NegocioModel } from './NegocioModel';
-
-function validarClaveLicencia(clave: string, _rubros: number): boolean {
-    const limpio = clave.replace(/[^a-zA-Z0-9]/g, '');
-    if (limpio.length !== 16) return false;
-    const digitos = limpio.split('').map(c => parseInt(c, 10)).filter(d => !isNaN(d) && d < 10);
-    if (digitos.length !== 16) return false;
-    let suma = 0;
-    for (let i = 0; i < 12; i++) {
-        suma += digitos[i] * (i + 1);
-    }
-    const checksum = suma % 10000;
-    const esperado = digitos[12] * 1000 + digitos[13] * 100 + digitos[14] * 10 + digitos[15];
-    return checksum === esperado;
-}
 
 export class WizardView {
     private contenedor: HTMLElement;
@@ -67,7 +53,7 @@ export class WizardView {
                         <p class="text-xs text-gray-600 font-bold">Clave de activación de 16 dígitos DatioLabs. Sin clave, opera en modo demostración.</p>
                         <input id="wz-licencia" type="text" maxlength="20" placeholder="Ej: 0001-8888-1111-0000"
                             class="w-full border-2 border-brand-black rounded px-4 py-2 text-sm font-mono font-bold focus:outline-none focus:ring-2 focus:ring-brand-purple tracking-wider" />
-                        <p id="wz-licencia-error" class="hidden text-red-700 font-bold text-xs">Clave no válida para los rubros seleccionados.</p>
+                        <p id="wz-licencia-error" class="hidden text-red-700 font-bold text-xs">Clave de licencia no válida o checksum incorrecto.</p>
                         <p class="text-[10px] text-gray-500 font-bold">Puede omitir este paso y activar la licencia posteriormente desde el Panel de Control Dueño(a).</p>
                     </div>
 
@@ -283,7 +269,7 @@ export class WizardView {
             }
             return;
         }
-        if (licenciaClave && !validarClaveLicencia(licenciaClave, rubros)) {
+        if (licenciaClave && !validarLicenciaUniversal(licenciaClave)) {
             if (licenciaError) {
                 licenciaError.classList.remove('hidden');
             }

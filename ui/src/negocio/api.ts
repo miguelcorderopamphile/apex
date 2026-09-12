@@ -14,6 +14,52 @@ export const CAP_GARANTIA = 1 << 6;
 export const CAP_COMISION = 1 << 7;
 export const TODAS_LAS_CAPACIDADES = CAP_UNITARIA | CAP_PESABLE | CAP_PERECEDERO | CAP_CUENTA_ABIERTA | CAP_SERIE | CAP_VARIANTES | CAP_GARANTIA | CAP_COMISION;
 
+/**
+ * Calcula el checksum ponderado de 4 dígitos para los primeros 12 dígitos de una licencia.
+ */
+export function calcularChecksumLicencia(digitos12: number[]): number {
+    let suma = 0;
+    for (let i = 0; i < 12; i++) {
+        suma += digitos12[i] * (i + 1);
+    }
+    return suma % 10000;
+}
+
+/**
+ * Valida una clave de licencia universal DatioLabs de 16 dígitos.
+ */
+export function validarLicenciaUniversal(clave: string): boolean {
+    const limpio = clave.replace(/[^0-9]/g, '');
+    if (limpio.length !== 16) return false;
+    const digitos = limpio.split('').map(c => parseInt(c, 10));
+    const checksum = calcularChecksumLicencia(digitos.slice(0, 12));
+    const esperado = digitos[12] * 1000 + digitos[13] * 100 + digitos[14] * 10 + digitos[15];
+    return checksum === esperado;
+}
+
+/**
+ * Genera una clave de licencia universal de 16 dígitos única e indeterminista con checksum garantizado.
+ */
+export function generarLicenciaUniversal(): string {
+    const digitos12: number[] = [];
+    // Utiliza criptografía nativa del navegador o node si está disponible
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+        const buffer = new Uint8Array(12);
+        crypto.getRandomValues(buffer);
+        for (let i = 0; i < 12; i++) {
+            digitos12.push(buffer[i] % 10);
+        }
+    } else {
+        for (let i = 0; i < 12; i++) {
+            digitos12.push(Math.floor(Math.random() * 10));
+        }
+    }
+    const checksum = calcularChecksumLicencia(digitos12);
+    const prefijo = digitos12.join('');
+    const sufijo = String(checksum).padStart(4, '0');
+    return `${prefijo}${sufijo}`;
+}
+
 interface TauriBridge {
     core?: {
         invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -1736,17 +1782,11 @@ function mockInvocar<T>(comando: string, args?: Record<string, unknown>): Promis
         }
         case 'obtener_licencia':
             return Promise.resolve(demoStore.licencia as unknown as T);
+        case 'generar_licencia':
+            return Promise.resolve(generarLicenciaUniversal() as unknown as T);
         case 'validar_licencia': {
             const clave = String(args?.clave || '');
-            const limpio = clave.replace(/[^a-zA-Z0-9]/g, '');
-            if (limpio.length !== 16) return Promise.resolve(false as unknown as T);
-            const digitos = limpio.split('').map(c => parseInt(c, 10)).filter(d => !isNaN(d) && d < 10);
-            if (digitos.length !== 16) return Promise.resolve(false as unknown as T);
-            let suma = 0;
-            for (let i = 0; i < 12; i++) suma += digitos[i] * (i + 1);
-            const checksum = suma % 10000;
-            const esperado = digitos[12] * 1000 + digitos[13] * 100 + digitos[14] * 10 + digitos[15];
-            return Promise.resolve((checksum === esperado) as unknown as T);
+            return Promise.resolve(validarLicenciaUniversal(clave) as unknown as T);
         }
         case 'obtener_tasa_bcv':
             return Promise.resolve(demoStore.tasaActual as unknown as T);
@@ -2065,6 +2105,7 @@ export const api = {
         invocar<BackupMetadata>('restaurar_desde_archivo', { contenidoBase64, nombreArchivo }),
     licencia: () => invocar<LicenciaInfo>('obtener_licencia'),
     validarLicencia: (clave: string) => invocar<boolean>('validar_licencia', { clave }),
+    generarLicencia: () => invocar<string>('generar_licencia'),
     cambiarPinDueno: (pinAnterior: string, pinNuevo: string) =>
         invocar<boolean>('cambiar_pin_dueno', { pinAnterior, pinNuevo }),
     actualizarPrivacidadInventario: (privacidadInventario: boolean) =>
