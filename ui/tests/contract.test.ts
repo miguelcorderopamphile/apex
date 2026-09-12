@@ -157,6 +157,17 @@ describe('Contrato de Datos Frontend <-> Backend Tauri', () => {
         expect(validarLicenciaUniversal('12345678901234567')).toBe(false);
         expect(validarLicenciaUniversal('1234567890129999')).toBe(false);
         expect(validarLicenciaUniversal('')).toBe(false);
+
+        // 10 licencias universales invariantes
+        const { generar10LicenciasUniversales } = await import('../src/negocio/api');
+        const diez = generar10LicenciasUniversales();
+        expect(diez).toHaveLength(10);
+        const set = new Set(diez);
+        expect(set.size).toBe(10);
+        diez.forEach((k) => {
+            expect(k).toHaveLength(16);
+            expect(validarLicenciaUniversal(k)).toBe(true);
+        });
     });
 });
 

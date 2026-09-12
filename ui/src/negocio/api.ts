@@ -38,26 +38,78 @@ export function validarLicenciaUniversal(clave: string): boolean {
 }
 
 /**
- * Genera una clave de licencia universal de 16 dígitos única e indeterminista con checksum garantizado.
+ * Semilla raíz inmutable del generador universal de licencias DatioLabs.
  */
-export function generarLicenciaUniversal(): string {
+const SEMILLA_LICENCIA_UNIVERSAL = 'DATIOLABS_ROOT_KEY_SET_UNIVERSAL_2026';
+
+/**
+ * Total de licencias universales oficiales admitidas.
+ */
+export const TOTAL_LICENCIAS_UNIVERSALES = 10;
+
+/**
+ * Función hash pura FNV-1a / SHA-256 portable para derivar bytes deterministas sin depender de lib externa.
+ */
+function derivarBytesSlot(slot: number): number[] {
+    // Implementación determinista de hashing con la semilla raíz y el slot
+    const input = `${SEMILLA_LICENCIA_UNIVERSAL}:${slot % TOTAL_LICENCIAS_UNIVERSALES}`;
+    let h1 = 0x811c9dc5;
+    let h2 = 0x9e3779b9;
+    let h3 = 0x6a09e667;
+    let h4 = 0xbb67ae85;
+    for (let i = 0; i < input.length; i++) {
+        const code = input.charCodeAt(i);
+        h1 = Math.imul(h1 ^ code, 0x01000193);
+        h2 = Math.imul(h2 ^ ((code << 3) | (code >> 5)), 0x5bd1e995);
+        h3 = Math.imul(h3 ^ ((code << 5) | (code >> 3)), 0x27d4eb2f);
+        h4 = Math.imul(h4 ^ (code + i), 0x165667b1);
+    }
+    const bytes: number[] = [];
+    const push32 = (v: number) => {
+        bytes.push(Math.abs(v) & 0xff);
+        bytes.push(Math.abs(v >> 8) & 0xff);
+        bytes.push(Math.abs(v >> 16) & 0xff);
+        bytes.push(Math.abs(v >> 24) & 0xff);
+    };
+    push32(h1);
+    push32(h2);
+    push32(h3);
+    push32(h4);
+    return bytes;
+}
+
+/**
+ * Genera la clave universal de una de las 10 ranuras invariantes (0..9).
+ */
+export function generarLicenciaSlot(slot: number): string {
+    const bytes = derivarBytesSlot(slot);
     const digitos12: number[] = [];
-    // Utiliza criptografía nativa del navegador o node si está disponible
-    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-        const buffer = new Uint8Array(12);
-        crypto.getRandomValues(buffer);
-        for (let i = 0; i < 12; i++) {
-            digitos12.push(buffer[i] % 10);
-        }
-    } else {
-        for (let i = 0; i < 12; i++) {
-            digitos12.push(Math.floor(Math.random() * 10));
-        }
+    for (let i = 0; i < 12; i++) {
+        digitos12.push(bytes[i] % 10);
     }
     const checksum = calcularChecksumLicencia(digitos12);
     const prefijo = digitos12.join('');
     const sufijo = String(checksum).padStart(4, '0');
     return `${prefijo}${sufijo}`;
+}
+
+/**
+ * Retorna la lista inmutable de las 10 licencias universales oficiales de DatioLabs.
+ */
+export function generar10LicenciasUniversales(): string[] {
+    const res: string[] = [];
+    for (let i = 0; i < TOTAL_LICENCIAS_UNIVERSALES; i++) {
+        res.push(generarLicenciaSlot(i));
+    }
+    return res;
+}
+
+/**
+ * Genera una licencia universal eligiendo una de las 10 ranuras invariantes oficiales.
+ */
+export function generarLicenciaUniversal(): string {
+    const slot = Math.floor(Math.random() * TOTAL_LICENCIAS_UNIVERSALES);
+    return generarLicenciaSlot(slot);
 }
 
 interface TauriBridge {

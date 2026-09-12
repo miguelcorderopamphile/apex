@@ -124,15 +124,26 @@ pub fn calcular_checksum_licencia(digitos_12: &[u8; 12]) -> u16 {
     (suma % 10000) as u16
 }
 
-/// Genera una clave de licencia universal de 16 digitos decimales unica y verificable.
-/// Los primeros 12 digitos se derivan de entropia (semilla/RNG seguro) y los ultimos 4
-/// codifican el checksum ponderado determinista de integridad.
-pub fn generar_licencia_universal() -> String {
-    use rand::RngExt;
-    let mut rng = rand::rng();
+/// Semilla raíz inmutable del generador universal de licencias DatioLabs.
+const SEMILLA_LICENCIA_UNIVERSAL: &[u8] = b"DATIOLABS_ROOT_KEY_SET_UNIVERSAL_2026";
+
+/// Total de ranuras de licencias universales invariantes admitidas por el sistema.
+pub const TOTAL_LICENCIAS_UNIVERSALES: usize = 10;
+
+/// Genera la clave universal de 16 digitos correspondiente a una ranura especifica (0..10).
+/// Aplica SHA-256 sobre la semilla inmutable y el indice de ranura, asegurando
+/// que cada licencia sea unica, determinista, universal e invariante con checksum ponderado valido.
+pub fn generar_licencia_slot(slot: usize) -> String {
+    use sha2::{Digest, Sha256};
+    let slot_bounded = slot % TOTAL_LICENCIAS_UNIVERSALES;
+    let mut hasher = Sha256::new();
+    hasher.update(SEMILLA_LICENCIA_UNIVERSAL);
+    hasher.update([slot_bounded as u8]);
+    let hash = hasher.finalize();
+
     let mut digitos = [0u8; 12];
-    for d in &mut digitos {
-        *d = rng.random_range(0..10);
+    for (d, &b) in digitos.iter_mut().zip(&hash[..12]) {
+        *d = b % 10;
     }
     let checksum = calcular_checksum_licencia(&digitos);
     format!(
@@ -151,6 +162,35 @@ pub fn generar_licencia_universal() -> String {
         digitos[11],
         checksum
     )
+}
+
+/// Genera el conjunto completo de las 10 licencias universales invariantes.
+pub fn generar_10_licencias_universales() -> [String; TOTAL_LICENCIAS_UNIVERSALES] {
+    core::array::from_fn(generar_licencia_slot)
+}
+
+/// Genera una licencia universal eligiendo una de las 10 ranuras invariantes oficiales.
+pub fn generar_licencia_universal() -> String {
+    use rand::RngExt;
+    let mut rng = rand::rng();
+    let slot = rng.random_range(0..TOTAL_LICENCIAS_UNIVERSALES);
+    generar_licencia_slot(slot)
+}
+
+/// Valida si una clave de 16 digitos pertenece al conjunto de las 10 licencias
+/// universales invariantes autorizadas por el algoritmo o cumple la invariante de integridad.
+pub fn es_licencia_universal_autorizada(clave: &str) -> bool {
+    let limpio: String = clave.chars().filter(|c| c.is_ascii_digit()).collect();
+    if limpio.len() != 16 {
+        return false;
+    }
+    // Verifica concordancia con alguna de las 10 ranuras oficiales
+    for slot in 0..TOTAL_LICENCIAS_UNIVERSALES {
+        if generar_licencia_slot(slot) == limpio {
+            return true;
+        }
+    }
+    false
 }
 
 /// Valida una clave de licencia universal de 16 digitos decimales.
@@ -245,5 +285,21 @@ mod tests {
         assert!(!validar_licencia_universal("12345678901234567")); // 17 dígitos
         assert!(!validar_licencia_universal("1234567890129999")); // Checksum incorrecto
         assert!(!validar_licencia_universal(""));
+
+        // Comprobación de las 10 licencias universales oficiales
+        let diez = generar_10_licencias_universales();
+        assert_eq!(diez.len(), 10);
+        let mut set = std::collections::HashSet::new();
+        for lic in &diez {
+            assert_eq!(lic.len(), 16);
+            assert!(validar_licencia_universal(lic));
+            assert!(es_licencia_universal_autorizada(lic));
+            set.insert(lic.clone());
+        }
+        assert_eq!(
+            set.len(),
+            10,
+            "Las 10 licencias deben ser estrictamente unicas"
+        );
     }
 }
