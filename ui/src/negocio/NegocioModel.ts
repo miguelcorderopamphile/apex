@@ -30,15 +30,16 @@ export class NegocioModel {
     }
 
     get rubroAbasto(): boolean {
-        return (this.config?.rubros ?? 0 & RUBRO_ABASTO) !== 0 || (this.config?.rubros ?? 0) === RUBRO_ABASTO;
+        return true;
     }
 
-    tieneRubro(bit: number): boolean {
-        return ((this.config?.rubros ?? 0) & bit) !== 0;
+    tieneRubro(_bit: number): boolean {
+        return true;
     }
 
     tieneCapacidad(bit: number): boolean {
-        return ((this.config?.capacidades ?? 0) & bit) !== 0;
+        if (!this.config?.capacidades) return true;
+        return (this.config.capacidades & bit) !== 0;
     }
 
     setRol(rol: 'caja' | 'panel'): void {

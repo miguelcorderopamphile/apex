@@ -5,6 +5,7 @@ pub const RUBRO_ABASTO: u16 = 1 << 0;
 pub const RUBRO_PANADERIA: u16 = 1 << 1;
 pub const RUBRO_LICORERIA: u16 = 1 << 2;
 pub const RUBRO_RETAIL: u16 = 1 << 3;
+pub const RUBRO_UNIVERSAL: u16 = RUBRO_ABASTO | RUBRO_PANADERIA | RUBRO_LICORERIA | RUBRO_RETAIL;
 
 pub const CAP_UNITARIA: u16 = 1 << 0;
 pub const CAP_PESABLE: u16 = 1 << 1;
@@ -14,6 +15,14 @@ pub const CAP_SERIE: u16 = 1 << 4;
 pub const CAP_VARIANTES: u16 = 1 << 5;
 pub const CAP_GARANTIA: u16 = 1 << 6;
 pub const CAP_COMISION: u16 = 1 << 7;
+pub const TODAS_LAS_CAPACIDADES: u16 = CAP_UNITARIA
+    | CAP_PESABLE
+    | CAP_PERECEDERO
+    | CAP_CUENTA_ABIERTA
+    | CAP_SERIE
+    | CAP_VARIANTES
+    | CAP_GARANTIA
+    | CAP_COMISION;
 
 #[derive(Debug, Error, PartialEq)]
 pub enum ErrorNegocio {
@@ -45,23 +54,27 @@ pub enum ErrorNegocio {
     },
 }
 
-/// Deduplicacion por OR de bits: si dos rubros comparten una capacidad,
-/// el resultado colapsa a un unico bit sin multiplicar registros.
+/// Deduplicacion por OR de bits: el software unificado activa
+/// todas las capacidades del motor de forma nativa e inherente.
 pub const fn capacidades_de_rubros(rubros: u16) -> u16 {
-    let mut caps = CAP_UNITARIA;
-    if rubros & RUBRO_ABASTO != 0 {
-        caps |= CAP_PESABLE;
+    if rubros == 0 {
+        TODAS_LAS_CAPACIDADES
+    } else {
+        let mut caps = CAP_UNITARIA;
+        if rubros & RUBRO_ABASTO != 0 {
+            caps |= CAP_PESABLE;
+        }
+        if rubros & RUBRO_PANADERIA != 0 {
+            caps |= CAP_PESABLE | CAP_PERECEDERO;
+        }
+        if rubros & RUBRO_LICORERIA != 0 {
+            caps |= CAP_CUENTA_ABIERTA;
+        }
+        if rubros & RUBRO_RETAIL != 0 {
+            caps |= CAP_SERIE | CAP_VARIANTES | CAP_GARANTIA | CAP_COMISION;
+        }
+        caps
     }
-    if rubros & RUBRO_PANADERIA != 0 {
-        caps |= CAP_PESABLE | CAP_PERECEDERO;
-    }
-    if rubros & RUBRO_LICORERIA != 0 {
-        caps |= CAP_CUENTA_ABIERTA;
-    }
-    if rubros & RUBRO_RETAIL != 0 {
-        caps |= CAP_SERIE | CAP_VARIANTES | CAP_GARANTIA | CAP_COMISION;
-    }
-    caps
 }
 
 pub const fn rubros_activos(rubros: u16) -> bool {

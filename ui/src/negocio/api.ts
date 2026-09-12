@@ -2,6 +2,7 @@ export const RUBRO_ABASTO = 1 << 0;
 export const RUBRO_PANADERIA = 1 << 1;
 export const RUBRO_LICORERIA = 1 << 2;
 export const RUBRO_RETAIL = 1 << 3;
+export const RUBRO_UNIVERSAL = RUBRO_ABASTO | RUBRO_PANADERIA | RUBRO_LICORERIA | RUBRO_RETAIL;
 
 export const CAP_UNITARIA = 1 << 0;
 export const CAP_PESABLE = 1 << 1;
@@ -11,6 +12,7 @@ export const CAP_SERIE = 1 << 4;
 export const CAP_VARIANTES = 1 << 5;
 export const CAP_GARANTIA = 1 << 6;
 export const CAP_COMISION = 1 << 7;
+export const TODAS_LAS_CAPACIDADES = CAP_UNITARIA | CAP_PESABLE | CAP_PERECEDERO | CAP_CUENTA_ABIERTA | CAP_SERIE | CAP_VARIANTES | CAP_GARANTIA | CAP_COMISION;
 
 interface TauriBridge {
     core?: {

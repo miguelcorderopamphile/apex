@@ -1,5 +1,5 @@
-import { api, ConfigInfo } from './api';
-import { NegocioModel, RUBRO_ABASTO, RUBRO_LICORERIA, RUBRO_PANADERIA, RUBRO_RETAIL } from './NegocioModel';
+import { api, ConfigInfo, RUBRO_UNIVERSAL } from './api';
+import { NegocioModel } from './NegocioModel';
 
 function validarClaveLicencia(clave: string, _rubros: number): boolean {
     const limpio = clave.replace(/[^a-zA-Z0-9]/g, '');
@@ -51,14 +51,14 @@ export class WizardView {
                             class="w-full border-2 border-brand-black rounded px-4 py-2.5 text-base font-bold focus:outline-none focus:ring-2 focus:ring-brand-purple" />
                     </div>
 
-                    <div>
-                        <p class="font-heading font-bold text-xs uppercase tracking-wide mb-2">Rubros comerciales activos:</p>
-                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                            ${this.tarjetaRubro('wz-abasto', 'Abasto', 'Comestibles y peso', RUBRO_ABASTO, 'bg-brand-cyan')}
-                            ${this.tarjetaRubro('wz-panaderia', 'Panadería', 'Horneados FEFO', RUBRO_PANADERIA, 'bg-brand-yellow')}
-                            ${this.tarjetaRubro('wz-licoreria', 'Licorería', 'Cuentas y consumo', RUBRO_LICORERIA, 'bg-brand-pink')}
-                            ${this.tarjetaRubro('wz-retail', 'Retail', 'Series y garantías', RUBRO_RETAIL, 'bg-purple-100')}
+                    <div class="bg-purple-50 border-2 border-brand-purple rounded-lg p-4 space-y-2">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-brand-purple"></span>
+                            <span class="font-heading font-black text-xs uppercase tracking-wide text-brand-purple">Motor Comercial Universal DatioLabs</span>
                         </div>
+                        <p class="text-xs text-gray-700 font-bold leading-relaxed">
+                            Todas las capacidades operan unificadas: venta unitaria y por peso (balanza), control de lotes y vencimiento FEFO, consumo y cuentas abiertas / fiados, presentaciones dinámicas (cajas, tobo, six-pack), series y garantías.
+                        </p>
                     </div>
 
                     <!-- Clave de Licencia Comercial -->
@@ -193,18 +193,6 @@ export class WizardView {
         this.conectarEventos();
     }
 
-    private tarjetaRubro(id: string, titulo: string, desc: string, bit: number, color: string, checked: boolean = false): string {
-        return `
-        <label for="${id}" class="cursor-pointer block select-none">
-            <div class="border-2 border-brand-black rounded-lg p-3 ${color} bg-opacity-30 hover:bg-opacity-50 transition-all hover:-translate-y-0.5 shadow-brutal-sm">
-                <div class="flex items-center justify-between">
-                    <span class="font-heading font-black text-sm text-brand-black">${titulo}</span>
-                    <input type="checkbox" id="${id}" data-bit="${bit}" ${checked ? 'checked' : ''} class="w-5 h-5 accent-brand-black cursor-pointer border-2 border-brand-black rounded" />
-                </div>
-                <p class="text-xs text-brand-text font-body mt-1 font-bold">${desc}</p>
-            </div>
-        </label>`;
-    }
 
     private conectarEventos(): void {
         const tabNuevo = document.getElementById('wz-tab-nuevo');
@@ -276,16 +264,14 @@ export class WizardView {
         const nombre = (document.getElementById('wz-nombre') as HTMLInputElement).value.trim();
         const pinInput = document.getElementById('wz-pin') as HTMLInputElement | null;
         const pin = this.bloquearPanel ? (pinInput?.value.trim() || '') : '';
-        const rubros =
-            [...this.contenedor.querySelectorAll<HTMLInputElement>('input[type=checkbox]:checked')]
-                .reduce((acc, c) => acc | Number(c.dataset.bit), 0);
+        const rubros = RUBRO_UNIVERSAL;
         const licenciaInput = document.getElementById('wz-licencia') as HTMLInputElement | null;
         const licenciaClave = licenciaInput?.value.trim() || '';
         const licenciaError = document.getElementById('wz-licencia-error');
 
-        if (!nombre || rubros === 0) {
+        if (!nombre) {
             if (errorBox) {
-                errorBox.textContent = 'Escribe el nombre del negocio y marca al menos un rubro.';
+                errorBox.textContent = 'Escribe el nombre del negocio para continuar.';
                 errorBox.classList.remove('hidden');
             }
             return;

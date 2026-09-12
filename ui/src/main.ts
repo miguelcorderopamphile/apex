@@ -91,7 +91,7 @@ class AppController {
         }
     }
 
-    private pintarBotonesRol(cfg: ConfigInfo): void {
+    private pintarBotonesRol(_cfg?: ConfigInfo): void {
         const contenedores = [
             document.getElementById('nav-actions-desktop'),
             document.getElementById('nav-actions-mobile'),
@@ -113,26 +113,21 @@ class AppController {
             };
 
             const btnCaja = crearBtn('btn-ir-caja', 'CAJA', 'caja');
+            const btnCuentas = crearBtn('btn-ir-cuentas', 'CUENTAS', 'cuentas');
             const btnVentas = crearBtn('btn-ir-ventas', 'VENTAS', 'ventas');
             const btnInventario = crearBtn('btn-ir-inventario', 'INVENTARIO', 'inventario');
             const btnPanel = crearBtn('btn-ir-panel', 'PANEL', 'panel');
             const btnGuia = crearBtn('btn-ir-guia', 'GUIA', 'guia');
 
-            const tieneCuentas = cfg.rubros !== 0;
-            let btnCuentas: HTMLButtonElement | null = null;
-            if (tieneCuentas) {
-                btnCuentas = crearBtn('btn-ir-cuentas', 'CUENTAS', 'cuentas');
-                btnCuentas.addEventListener('click', () => void this.arrancarCuentas());
-            }
-
             nav.appendChild(btnCaja);
-            if (btnCuentas) nav.appendChild(btnCuentas);
+            nav.appendChild(btnCuentas);
             nav.appendChild(btnVentas);
             nav.appendChild(btnInventario);
             nav.appendChild(btnPanel);
             nav.appendChild(btnGuia);
 
             btnCaja.addEventListener('click', () => void this.arrancarCaja());
+            btnCuentas.addEventListener('click', () => void this.arrancarCuentas());
             btnVentas.addEventListener('click', () => void this.arrancarVentas());
             btnInventario.addEventListener('click', () => void this.arrancarInventario());
             btnPanel.addEventListener('click', () => this.solicitarAccesoPanel());
